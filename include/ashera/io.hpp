@@ -9,9 +9,15 @@
 
 namespace ashera {
 
+/**
+* @brief Load reads from the fasta/fastq file
+*/
 auto LoadReads(std::string const& reads)
     -> std::vector<std::unique_ptr<biosoup::NucleicAcid>>;
 
+/**
+* @brief Load reads from multiple fasta/fastq files
+*/
 auto LoadReads(std::vector<std::string> const& reads)
     -> std::vector<std::unique_ptr<biosoup::NucleicAcid>>;
 

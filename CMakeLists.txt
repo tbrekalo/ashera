@@ -9,7 +9,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 
 include(FetchContent)
 include(cmake/Warnings.cmake)
-
 find_package(cxxopts 3.0.0 QUIET)
 if (NOT cxxopts_FOUND)
   FetchContent_Declare(
@@ -54,8 +53,19 @@ if(NOT biosoup_FOUND)
   FetchContent_MakeAvailable(biosoup)
 endif()
 
+find_package(thread_pool 4.0.0 QUIET)
+if (NOT thread_pool_FOUND)
+  FetchContent_Declare(
+    thread_pool
+    GIT_REPOSITORY https://github.com/rvaser/thread_pool
+    GIT_TAG 4.0.0
+  )
+endif()
+
 set(${PROJECT_NAME}_LIB_SRC
+  src/ashera/engine.cxx
   src/ashera/io.cxx
+  src/ashera/thread_pool.cxx
 )
 
 add_library(${PROJECT_NAME} STATIC ${${PROJECT_NAME}_LIB_SRC})
@@ -68,7 +78,7 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 17)
 set_default_warnings(${PROJECT_NAME} INTERFACE FALSE)
 
 target_link_libraries(${PROJECT_NAME} 
-  PUBLIC biosoup
+  PUBLIC biosoup thread_pool
   PRIVATE bioparser ram)
 
 add_executable(${PROJECT_NAME}_exe src/main.cxx)
