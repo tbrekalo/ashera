@@ -16,7 +16,7 @@ namespace detail {
 auto constexpr kStampLen = 12UL;
 auto constexpr kStampPrecision = 3UL;
 
-// ~500mb
+// ~2GB
 auto constexpr kMinimapBatchCap = 1U << 31U;
 auto constexpr kFilterFrequency = 0.001;
 
@@ -172,7 +172,7 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
       for (auto& future : batch_futures) {
         for (auto&& ovlp : future.get()) {
           overlaps[ovlp.lhs_id].push_back(ovlp);
-          overlaps[ovlp.rhs_id].push_back(ovlp);
+          overlaps[ovlp.rhs_id].push_back(detail::ReverseOverlap(ovlp));
         }
       }
 
