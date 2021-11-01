@@ -7,14 +7,13 @@
 
 #include "ashera/thread_pool.hpp"
 #include "biosoup/timer.hpp"
+#include "fmt/compile.h"
+#include "fmt/core.h"
 #include "ram/minimizer_engine.hpp"
 
 namespace ashera {
 
 namespace detail {
-
-auto constexpr kStampLen = 12UL;
-auto constexpr kStampPrecision = 3UL;
 
 // ~2GB
 auto constexpr kMinimapBatchCap = 1U << 31U;
@@ -129,13 +128,11 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
     reads[i]->id = i;
   }
 
-  std::cerr << "[ashera::Engine::Correct]("
-            /* clang-format off */
-            << std::setw(detail::kStampLen)
-            << std::setprecision(detail::kStampPrecision)
-            << timer.Stop()
-            /* clang-format on */
-            << ") reordered sequences" << std::endl;
+  fmt::print(
+      stderr,
+      FMT_COMPILE(
+          "[ashera::Engine::Correct]({:12.3f}s) : reordered sequences\n"),
+      timer.Stop());
 
   auto minimizer_engine = detail::CreateMinimizerEngine(MinimapParams());
   auto const thread_pool = GetThreadPoolPtr();
@@ -186,26 +183,20 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
                                 std::next(reads.cbegin(), batch_end), true);
       minimizer_engine.Filter(detail::kFilterFrequency);
 
-      std::cerr << "[ashera::Engine::Correct]("
-                /* clang-format off */
-                << std::setw(detail::kStampLen)
-                << std::setprecision(detail::kStampPrecision)
-                << timer.Stop()
-                /* clang-format on */
-                << ") minimized " << (batch_end - batch_begin) << " sequences"
-                << std::endl;
+      fmt::print(
+          stderr,
+          FMT_COMPILE(
+              "[ashera::Engine::Correct]({:12.3f}) : minimized {} sequences\n"),
+          timer.Stop(), (batch_end - batch_begin));
 
       timer.Start();
       map_batch(batch_begin, batch_end);
 
-      std::cerr << "[ashera::Engine::Correct]("
-                /* clang-format off */
-                << std::setw(detail::kStampLen)
-                << std::setprecision(detail::kStampPrecision)
-                << timer.Stop()
-                /* clang-format on */
-                << ") mapped " << (batch_end - batch_begin) << " sequences"
-                << std::endl;
+      fmt::print(
+          stderr,
+          FMT_COMPILE(
+              "[ashera::Engine::Correct]({:12.3f}) : mapped {} sequences\n"),
+          timer.Stop(), (batch_end - batch_begin));
 
       batch_begin = batch_end;
     }
@@ -214,14 +205,11 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
       auto const batch_end = find_batch_end_idx(batch_begin, reads.size());
       map_batch(batch_begin, batch_end);
 
-      std::cerr << "[ashera::Engine::Correct]("
-                /* clang-format off */
-                << std::setw(detail::kStampLen)
-                << std::setprecision(detail::kStampPrecision)
-                << timer.Stop()
-                /* clang-format on */
-                << ") mapped " << (batch_end - batch_begin) << " sequences"
-                << std::endl;
+      fmt::print(
+          stderr,
+          FMT_COMPILE(
+              "[ashera::Engine::Correct]({:12.3f}) : mapped {} sequences\n"),
+          timer.Stop(), (batch_end - batch_begin));
 
       batch_begin = batch_end;
     }

@@ -11,6 +11,8 @@
 #include "ashera/thread_pool.hpp"
 #include "biosoup/timer.hpp"
 #include "cxxopts.hpp"
+#include "fmt/compile.h"
+#include "fmt/core.h"
 
 int main(int argc, char** argv) {
   try {
@@ -40,15 +42,16 @@ int main(int argc, char** argv) {
     auto const reads = result["reads"].as<std::vector<std::string>>();
     auto sequences = ashera::LoadReads(reads);
 
-    std::cerr << "[ashera](" << std::setw(12) << std::setprecision(3)
-              << timer.Stop() << "s) : loaded " << sequences.size()
-              << " sequences" << std::endl;
+    fmt::print(stderr,
+               FMT_COMPILE("[ashera]({:12.3f}s) : loaded {} sequences\n"),
+               timer.Stop(), sequences.size());
 
     timer.Start();
     auto ans = engine.Correct(std::move(sequences));
 
-    std::cerr << "[ashera](" << std::setw(12) << std::setprecision(3)
-              << timer.Stop() << "s) : generated corrected reads " << std::endl;
+    fmt::print(stderr,
+               FMT_COMPILE("[ashera]({:12.3f}s) : generated corrected reads\n"),
+               timer.Stop());
 
   } catch (std::exception const& e) {
     std::cerr << e.what() << std::endl;

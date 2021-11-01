@@ -60,7 +60,21 @@ if (NOT thread_pool_FOUND)
     GIT_REPOSITORY https://github.com/rvaser/thread_pool
     GIT_TAG 4.0.0
   )
+
+  FetchContent_MakeAvailable(thread_pool)
 endif()
+
+find_package(fmt 8.0.1 QUIET)
+if (NOT FMT_FOUND)
+  FetchContent_Declare(
+    fmt
+    GIT_REPOSITORY https://github.com/fmtlib/fmt
+    GIT_TAG 8.0.1
+  )
+
+  FetchContent_MakeAvailable(fmt)
+endif()
+
 
 set(${PROJECT_NAME}_LIB_SRC
   src/ashera/engine.cxx
@@ -79,10 +93,10 @@ set_default_warnings(${PROJECT_NAME} INTERFACE FALSE)
 
 target_link_libraries(${PROJECT_NAME} 
   PUBLIC biosoup thread_pool
-  PRIVATE bioparser ram)
+  PRIVATE bioparser ram fmt)
 
 add_executable(${PROJECT_NAME}_exe src/main.cxx)
-target_link_libraries(${PROJECT_NAME}_exe PRIVATE ${PROJECT_NAME} cxxopts)
+target_link_libraries(${PROJECT_NAME}_exe PRIVATE ${PROJECT_NAME} cxxopts fmt)
 
 set_property(TARGET ${PROJECT_NAME}_exe PROPERTY CXX_STANDARD 17)
 

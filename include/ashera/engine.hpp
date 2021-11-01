@@ -50,6 +50,6 @@ class Engine {
   std::uint32_t win_size_;
 };
 
-};  // namespace ashera
+}  // namespace ashera
 
 #endif /* ASHERA_ENGINE_HPP */
