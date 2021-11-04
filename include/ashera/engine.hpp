@@ -30,7 +30,7 @@ class Engine {
   /**
    * @brief construct read correction engine
    */
-  Engine(std::uint32_t win_size_);
+  Engine(float top_len_percentile, std::uint32_t win_size);
 
   // disable copying
   Engine(Engine const&) = delete;
@@ -47,6 +47,7 @@ class Engine {
       -> std::vector<std::unique_ptr<biosoup::NucleicAcid>>;
 
  private:
+  float top_len_percentile_;
   std::uint32_t win_size_;
 };
 

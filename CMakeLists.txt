@@ -75,8 +75,10 @@ if (NOT FMT_FOUND)
   FetchContent_MakeAvailable(fmt)
 endif()
 
-
 set(${PROJECT_NAME}_LIB_SRC
+  src/ashera/detail/assembly.cxx
+  src/ashera/detail/overlap.cxx
+
   src/ashera/engine.cxx
   src/ashera/io.cxx
   src/ashera/thread_pool.cxx
