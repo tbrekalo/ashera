@@ -103,7 +103,7 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
                                std::size_t const batch_end,
                                auto&& ovlp_filer) -> void {
       static_assert(
-          detail::IsOverlapFiler<decltype(ovlp_filer)>,
+          detail::IsOverlapFilerV<decltype(ovlp_filer)>,
           "ovlp_filer must satisfy ovlp_filter(biosoup::overlap) -> bool");
 
       for (auto i = batch_begin; i < batch_end; ++i) {
@@ -181,7 +181,8 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
         timer.Stop(), edge_candidates.size());
   }
 
-  // TODO: update
+  auto back_bones = detail::AssembleBackbones(reads, edge_candidates);
+
   return {};
 }
 
