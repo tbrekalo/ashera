@@ -1,12 +1,13 @@
 #include "assembly.hpp"
 
 #include <algorithm>
-#include <cassert>
 #include <iterator>
 #include <unordered_set>
 
 #include "fmt/compile.h"
 #include "fmt/core.h"
+
+namespace ashera::detail {
 
 struct Node;
 struct Edge;
@@ -15,14 +16,20 @@ std::atomic_uint32_t node_cnt;
 std::atomic_uint32_t edge_cnt;
 std::atomic_uint32_t bb_seq_cnt;
 
+auto ResetObjCounters() -> void {
+  node_cnt = 0;
+  edge_cnt = 0;
+  bb_seq_cnt = 0;
+}
+
 struct Node {
-  Node(biosoup::NucleicAcid seq) : id(node_cnt), seq(std::move(seq)) {}
+  Node(biosoup::NucleicAcid seq) : id(node_cnt++), seq(std::move(seq)) {}
 
   std::uint32_t const id;
   biosoup::NucleicAcid seq;
 
-  Edge* in_edge;
-  Edge* out_edge;
+  Edge* in_edge = nullptr;
+  Edge* out_edge = nullptr;
 };
 
 struct NodePairing {
@@ -35,9 +42,12 @@ struct Edge {
       : tail_ptr(tail_ptr), head_ptr(head_ptr), length(length) {}
 
   auto Data() const -> std::string { return tail_ptr->seq.InflateData(length); }
+  auto Quality() const -> std::string {
+    return tail_ptr->seq.InflateQuality(length);
+  }
 
-  Node* tail_ptr;
-  Node* head_ptr;
+  Node* tail_ptr = nullptr;
+  Node* head_ptr = nullptr;
   std::uint32_t length;
 };
 
@@ -48,7 +58,7 @@ auto CreateNodePairing(biosoup::NucleicAcid seq) -> NodePairing {
   dst.rev_comp = std::make_unique<Node>(seq);
 
   seq.ReverseAndComplement();
-  dst.rev_comp = std::make_unique<Node>(std::move(seq));
+  dst.original = std::make_unique<Node>(std::move(seq));
 
   return dst;
 }
@@ -56,10 +66,13 @@ auto CreateNodePairing(biosoup::NucleicAcid seq) -> NodePairing {
 auto NodeChainToSeq(Node const* begin, Node const* end)
     -> std::unique_ptr<biosoup::NucleicAcid> {
   auto data = std::string();
+  auto quality = std::string();
 
   auto curr_node = begin;
   auto const traverse = [&]() -> void {
     data += curr_node->out_edge->Data();
+    quality += curr_node->out_edge->Quality();
+
     curr_node = curr_node->out_edge->head_ptr;
   };
 
@@ -70,6 +83,7 @@ auto NodeChainToSeq(Node const* begin, Node const* end)
     } else {
       if (curr_node != begin) {
         data += curr_node->seq.InflateData();
+        quality += curr_node->seq.InflateQuality();
       }
 
       break;
@@ -78,8 +92,8 @@ auto NodeChainToSeq(Node const* begin, Node const* end)
 
   auto name = fmt::format(FMT_COMPILE("BbSeq_{:7d}"), bb_seq_cnt++);
 
-  return std::make_unique<biosoup::NucleicAcid>(std::move(name),
-                                                std::move(data));
+  return std::make_unique<biosoup::NucleicAcid>(
+      std::move(name), std::move(data), std::move(quality));
 }
 
 auto SeqsToNodes(std::vector<std::unique_ptr<biosoup::NucleicAcid>> const& seqs)
@@ -96,7 +110,6 @@ auto SeqsToNodes(std::vector<std::unique_ptr<biosoup::NucleicAcid>> const& seqs)
   return dst;
 }
 
-namespace ashera::detail {
 /**
  * @brief assemble backbone sequences for consensus tool
  */
@@ -104,6 +117,7 @@ auto AssembleBackbones(
     std::vector<std::unique_ptr<biosoup::NucleicAcid>> const& seqs,
     std::vector<EdgeCandidate> const& edge_candidates)
     -> std::vector<std::unique_ptr<biosoup::NucleicAcid>> {
+  ResetObjCounters();
 
   auto nodes = SeqsToNodes(seqs);
   auto edges = std::vector<std::unique_ptr<Edge>>();
@@ -127,9 +141,6 @@ auto AssembleBackbones(
     auto const ovlp_type = DetermineOverlapType(
         ovlp, seqs[ovlp.lhs_id]->inflated_len, seqs[ovlp.rhs_id]->inflated_len);
 
-    assert(ovlp_type == OverlapType::kLhsToRhs ||
-           ovlp_type == OverlapType::kRhsToLhs);
-
     auto& lhs_node = nodes[ovlp.lhs_id].original;
     auto& rhs_node =
         ovlp.strand ? nodes[ovlp.rhs_id].original : nodes[ovlp.rhs_id].rev_comp;
@@ -143,17 +154,58 @@ auto AssembleBackbones(
     } else {  // OverlapType::kRhsToLhs
       if (can_connect(rhs_node.get(), lhs_node.get())) {
         auto const edge_len = ovlp.rhs_begin - ovlp.lhs_begin;
-        edges.emplace_back(rhs_node.get(), lhs_node.get(), edge_len);
+        edges.emplace_back(
+            connect_via(rhs_node.get(), lhs_node.get(), edge_len));
       }
     }
   }
 
   auto dst = std::vector<std::unique_ptr<biosoup::NucleicAcid>>();
-  auto visited = std::vector<std::uint8_t>(node_cnt);
+  auto visited = std::vector<std::uint8_t>(node_cnt, 0);
 
-  // traverse chains and make sequeces
+  for (auto const& e : edges) {
+    auto begin = e->tail_ptr;
+    auto end = e->head_ptr;
 
-  return {};
+    auto chain_len = 2UL;
+
+    if (visited[begin->id] || visited[end->id]) {
+      continue;
+    }
+
+    visited[begin->id] = 1;
+    visited[end->id] = 1;
+
+    // expand left
+    while (begin->in_edge != nullptr) {
+      visited[begin->id] = 1;
+      auto const new_begin = begin->in_edge->tail_ptr;
+      if (new_begin == nullptr || visited[new_begin->id]) {
+        break;
+      } else {
+        begin = new_begin;
+        ++chain_len;
+      }
+    }
+
+    // expand right
+    while (end->out_edge != nullptr) {
+      visited[end->id] = 1;
+      auto const new_end = end->out_edge->head_ptr;
+      if (new_end == nullptr || visited[new_end->id]) {
+        break;
+      } else {
+        end = new_end;
+        ++chain_len;
+      }
+    }
+
+    if (chain_len >= 5) {
+      dst.emplace_back(NodeChainToSeq(begin, end));
+    }
+  }
+
+  return dst;
 }
 
 }  // namespace ashera::detail

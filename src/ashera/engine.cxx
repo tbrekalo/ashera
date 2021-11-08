@@ -181,7 +181,15 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
         timer.Stop(), edge_candidates.size());
   }
 
-  auto back_bones = detail::AssembleBackbones(reads, edge_candidates);
+  timer.Start();
+
+  auto backbones = detail::AssembleBackbones(reads, edge_candidates);
+
+  fmt::print(
+      stderr,
+      FMT_COMPILE(
+          "[ashera::Engine::Correct]({:12.3f}) : created {} backbone sequences\n"),
+      timer.Stop(), backbones.size());
 
   return {};
 }
