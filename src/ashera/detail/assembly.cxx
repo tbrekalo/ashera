@@ -202,6 +202,7 @@ auto AssembleBackbones(
 
     if (chain_len >= 5) {
       dst.emplace_back(NodeChainToSeq(begin, end));
+      dst.back()->id = dst.size() - 1U;
     }
   }
 

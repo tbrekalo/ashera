@@ -11,6 +11,7 @@
 #include "detail/assembly.hpp"
 #include "fmt/compile.h"
 #include "fmt/core.h"
+#include "racon/polisher.hpp"
 #include "ram/minimizer_engine.hpp"
 
 namespace ashera {
@@ -185,13 +186,23 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
 
   auto backbones = detail::AssembleBackbones(reads, edge_candidates);
 
+  fmt::print(stderr,
+             FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : created {} "
+                         "backbone sequences\n"),
+             timer.Stop(), backbones.size());
+
+  auto polisher = racon::Polisher::Create(GetThreadPoolPtr());
+
+  timer.Start();
+
+  auto dst = polisher->Polish(backbones, reads, false);
+
   fmt::print(
       stderr,
-      FMT_COMPILE(
-          "[ashera::Engine::Correct]({:12.3f}) : created {} backbone sequences\n"),
-      timer.Stop(), backbones.size());
+      FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : polished backbones\n"),
+      timer.Stop());
 
-  return {};
+  return dst;
 }
 
 }  // namespace ashera

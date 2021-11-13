@@ -45,6 +45,17 @@ if (NOT ram_FOUND)
   FetchContent_MakeAvailable(ram)
 endif()
 
+find_package(racon 1.4.21 QUIET)
+if (NOT racon_FOUND)
+  FetchContent_Declare(
+    racon   
+    GIT_REPOSITORY https://github.com/lbcb-sci/racon
+    GIT_TAG library
+  )
+
+  FetchContent_MakeAvailable(racon)
+endif()
+
 find_package(biosoup 0.10.0 QUIET)
 if(NOT biosoup_FOUND)
   FetchContent_Declare(
@@ -98,7 +109,7 @@ set_default_warnings(${PROJECT_NAME} INTERFACE FALSE)
 
 target_link_libraries(${PROJECT_NAME} 
   PUBLIC biosoup thread_pool
-  PRIVATE bioparser ram fmt)
+  PRIVATE bioparser ram fmt racon)
 
 add_executable(${PROJECT_NAME}_exe src/main.cxx)
 target_link_libraries(${PROJECT_NAME}_exe PRIVATE ${PROJECT_NAME} cxxopts fmt)

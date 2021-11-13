@@ -56,6 +56,10 @@ int main(int argc, char** argv) {
                FMT_COMPILE("[ashera]({:12.3f}s) : generated corrected reads\n"),
                timer.Stop());
 
+    for (auto const& it : ans) {
+      fmt::print(stdout, FMT_COMPILE(">{}\n{}\n"), it->name, it->InflateData());
+    }
+
   } catch (std::exception const& e) {
     std::cerr << e.what() << std::endl;
     return EXIT_SUCCESS;
