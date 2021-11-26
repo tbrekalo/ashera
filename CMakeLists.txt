@@ -89,8 +89,18 @@ if (NOT FMT_FOUND)
   FetchContent_MakeAvailable(fmt)
 endif()
 
+find_package(edlib 1.2.7 QUIET)
+if (NOT edlib_FOUND)
+  FetchContent_Declare(
+    edlib
+    GIT_REPOSITORY https://github.com/Martinsos/edlib
+    GIT_TAG v1.2.7
+  )
+
+  FetchContent_MakeAvailable(edlib)
+endif()
+
 set(${PROJECT_NAME}_LIB_SRC
-  src/ashera/detail/assembly.cxx
   src/ashera/detail/overlap.cxx
 
   src/ashera/engine.cxx
@@ -109,7 +119,7 @@ set_default_warnings(${PROJECT_NAME} INTERFACE FALSE)
 
 target_link_libraries(${PROJECT_NAME} 
   PUBLIC biosoup thread_pool
-  PRIVATE bioparser ram fmt racon)
+  PRIVATE bioparser ram fmt racon edlib)
 
 add_executable(${PROJECT_NAME}_exe src/main.cxx)
 target_link_libraries(${PROJECT_NAME}_exe PRIVATE ${PROJECT_NAME} cxxopts fmt)

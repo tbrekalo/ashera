@@ -41,6 +41,24 @@ template <class T>
 bool constexpr IsOverlapFilerV = OverlapFilterConcept<T>::value;
 
 /**
+ * @brief concept for overlap sink callable:
+ *          Sink(biosoup::Overlap const&) -> void;
+ */
+template <class Impl, class = std::void_t<>>
+struct OverlapSinkConcept : std::false_type {};
+
+template <class Impl>
+struct OverlapSinkConcept<Impl, std::void_t<decltype(std::declval<Impl>()(
+                                    std::declval<biosoup::Overlap const&>()))>>
+    : std::is_invocable_r<void, Impl, biosoup::Overlap const&> {};
+
+/**
+ * @brief helper for @ref OverlapSinkConcept
+ */
+template <class T>
+bool constexpr IsOverlapSinkV = OverlapSinkConcept<T>::value;
+
+/**
  * @brief Determine overlap type provided origin sequence length information
  */
 auto DetermineOverlapType(biosoup::Overlap const ovlp,
