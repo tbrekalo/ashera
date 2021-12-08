@@ -23,8 +23,6 @@ int main(int argc, char** argv) {
     options.add_options()
       ("t,threads", "number of threads given to Ashera", cxxopts::value<std::uint32_t>())
       ("w,window", "window size used for correction", cxxopts::value<std::uint32_t>())
-      ("l,len", "percentile of longest reads for backbone sequences", 
-        cxxopts::value<float>())
       ("reads", "input reads", cxxopts::value<std::vector<std::string>>());
     /* clang-format on */
 
@@ -35,9 +33,7 @@ int main(int argc, char** argv) {
     ashera::InitThreadPool(n_threads);
 
     auto const win_size = result["window"].as<std::uint32_t>();
-    auto const len_percentile = result["len"].as<float>();
-
-    auto engine = ashera::Engine(len_percentile, win_size);
+    auto engine = ashera::Engine(win_size);
 
     auto timer = biosoup::Timer();
     timer.Start();

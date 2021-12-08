@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <unordered_map>
 
@@ -30,6 +32,9 @@ auto constexpr kAlignBatchCap = 1ULL < 28ULL;  // ~250MB
 
 auto constexpr kFilterFrequency = 0.001;
 
+auto constexpr kMinAbsMisFreq = 3U;
+auto constexpr kMinRelMisFreq = 0.66;
+
 auto CreateMinimizerEngine(MinimapParams params) -> ram::MinimizerEngine {
   return ram::MinimizerEngine(GetThreadPoolPtr(), params.k, params.w,
                               params.bandwidth, params.chain, params.matches,
@@ -44,6 +49,14 @@ struct Mismatch {
 };
 
 class MismatchCnt {
+  auto MaxElemeFreqSum() const noexcept {
+    auto const max_iter = std::max_element(cnts_.begin(), cnts_.end());
+    auto const freq_sum =
+        static_cast<float>(std::accumulate(cnts_.begin(), cnts_.end(), 0U));
+
+    return std::make_pair(max_iter, freq_sum);
+  }
+
  public:
   MismatchCnt() : cnts_{0U, 0U, 0U, 0U} {}
 
@@ -53,12 +66,18 @@ class MismatchCnt {
     return cnts_[code];
   }
 
-  auto MostFrequent() const noexcept -> std::pair<std::uint8_t, std::uint32_t> {
-    auto const max_iter = std::max_element(cnts_.begin(), cnts_.end());
+  auto MostFrequent() const noexcept -> std::pair<std::uint8_t, float> {
+    auto const [max_iter, freq_sum] = MaxElemeFreqSum();
     auto const max_elem_code = std::distance(cnts_.begin(), max_iter);
-
-    return std::make_pair(max_elem_code, *max_iter);
+    // can avoid checking division by zero
+    // if the MismatchCnt is constructed; it at least has one entry
+    return std::make_pair(std::uint8_t(5), *max_iter / freq_sum);
   };
+
+  auto DominantFreq() const noexcept -> std::pair<std::uint32_t, float> {
+    auto const [max_iter, freq_sum] = MaxElemeFreqSum();
+    return std::make_pair(*max_iter, *max_iter / freq_sum);
+  }
 
  private:
   std::array<std::uint32_t, 4> cnts_;
@@ -76,8 +95,7 @@ MinimapParams::MinimapParams(std::uint32_t k, std::uint32_t w,
       matches(matches),
       gap(gap) {}
 
-Engine::Engine(float top_len_percentile, std::uint32_t win_size)
-    : top_len_percentile_(top_len_percentile), win_size_(win_size) {}
+Engine::Engine(std::uint32_t win_size) : win_size_(win_size) {}
 
 auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
     -> std::vector<std::unique_ptr<biosoup::NucleicAcid>> {
@@ -131,19 +149,17 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
         switch (edlib_result.alignment[i]) {
           case 0:
           case 3: {
-            if (edlib_result.alignment[i] == 3) {
-              dst.push_back(
-                  detail::Mismatch{.seq_id = query_id,
-                                   .pos = query_pos,
-                                   .code = static_cast<std::uint8_t>(
-                                       reads[target_id]->Code(target_pos))});
+            dst.push_back(
+                detail::Mismatch{.seq_id = query_id,
+                                 .pos = query_pos,
+                                 .code = static_cast<std::uint8_t>(
+                                     reads[target_id]->Code(target_pos))});
 
-              dst.push_back(
-                  detail::Mismatch{.seq_id = target_id,
-                                   .pos = target_pos,
-                                   .code = static_cast<std::uint8_t>(
-                                       reads[query_id]->Code(query_pos))});
-            }
+            dst.push_back(
+                detail::Mismatch{.seq_id = target_id,
+                                 .pos = target_pos,
+                                 .code = static_cast<std::uint8_t>(
+                                     reads[query_id]->Code(query_pos))});
 
             ++query_pos;
             ++target_pos;
@@ -255,6 +271,30 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
       minimize_batch_begin = minimize_batch_end;
     }
   }
+
+  auto mstrm = std::ofstream("mismatches");
+  auto log_vec = std::vector<std::uint32_t>();
+
+  for (auto read_id = 0U; read_id < reads.size(); ++read_id) { 
+    for (auto const [pos, misses] : mismatches[read_id]) {
+      auto const [abs_freq, rel_freq] = misses.DominantFreq();
+      if (abs_freq >= detail::kMinAbsMisFreq && rel_freq > detail::kMinRelMisFreq) {
+        log_vec.push_back(pos);  
+      }
+    }
+
+    if (!log_vec.empty()) {
+      mstrm << read_id << ' ';
+      for (auto const pos : log_vec) {
+        mstrm << pos << ' ';
+      }
+      mstrm << '\n';
+
+      log_vec.clear();
+    }
+  }
+
+  std::flush(mstrm);
 
   timer.Start();
 
