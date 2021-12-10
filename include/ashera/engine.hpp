@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "biosoup/nucleic_acid.hpp"
+#include "thread_pool/thread_pool.hpp"
 
 namespace ashera {
 
@@ -30,7 +31,7 @@ class Engine {
   /**
    * @brief construct read correction engine
    */
-  Engine(std::uint32_t win_size);
+  Engine(std::shared_ptr<thread_pool::ThreadPool> thread_pool, std::uint32_t win_size);
 
   // disable copying
   Engine(Engine const&) = delete;
@@ -47,6 +48,7 @@ class Engine {
       -> std::vector<std::unique_ptr<biosoup::NucleicAcid>>;
 
  private:
+  std::shared_ptr<thread_pool::ThreadPool> thread_pool_;
   std::uint32_t win_size_;
 };
 

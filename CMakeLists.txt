@@ -12,6 +12,18 @@ set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fno-omit-frame-point
 
 include(FetchContent)
 include(cmake/Warnings.cmake)
+
+# find_package(mimalloc 2.0.3 QUIET)
+# if (NOT mimalloc_FOUND)
+  FetchContent_Declare(
+    mimalloc
+    GIT_REPOSITORY https://github.com/microsoft/mimalloc
+    GIT_TAG v2.0.3
+  )
+
+  FetchContent_MakeAvailable(mimalloc)
+# endif()
+
 find_package(cxxopts 3.0.0 QUIET)
 if (NOT cxxopts_FOUND)
   FetchContent_Declare(
@@ -105,7 +117,6 @@ set(${PROJECT_NAME}_LIB_SRC
 
   src/ashera/engine.cxx
   src/ashera/io.cxx
-  src/ashera/thread_pool.cxx
 )
 
 add_library(${PROJECT_NAME} STATIC ${${PROJECT_NAME}_LIB_SRC})
@@ -118,7 +129,7 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 17)
 set_default_warnings(${PROJECT_NAME} INTERFACE FALSE)
 
 target_link_libraries(${PROJECT_NAME} 
-  PUBLIC biosoup thread_pool
+  PUBLIC biosoup thread_pool mimalloc
   PRIVATE bioparser ram fmt racon edlib)
 
 add_executable(${PROJECT_NAME}_exe src/main.cxx)

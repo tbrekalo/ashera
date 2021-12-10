@@ -8,7 +8,6 @@
 
 #include "ashera/engine.hpp"
 #include "ashera/io.hpp"
-#include "ashera/thread_pool.hpp"
 #include "biosoup/timer.hpp"
 #include "cxxopts.hpp"
 #include "fmt/compile.h"
@@ -30,10 +29,10 @@ int main(int argc, char** argv) {
     auto const result = options.parse(argc, argv);
 
     auto const n_threads = result["threads"].as<std::uint32_t>();
-    ashera::InitThreadPool(n_threads);
 
     auto const win_size = result["window"].as<std::uint32_t>();
-    auto engine = ashera::Engine(win_size);
+    auto engine = ashera::Engine(
+        std::make_shared<thread_pool::ThreadPool>(n_threads), win_size);
 
     auto timer = biosoup::Timer();
     timer.Start();

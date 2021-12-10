@@ -70,6 +70,17 @@ auto DetermineOverlapType(biosoup::Overlap const ovlp,
  */
 auto ReverseOverlap(biosoup::Overlap const& ovlp) -> biosoup::Overlap;
 
+/**
+ * @brief calculate overlap length
+ */
+auto OverlapLength(biosoup::Overlap const& ovlp) -> std::uint32_t;
+
+/**
+ * @brief calculate overlap score
+ */
+
+auto OverlapScore(biosoup::Overlap const& ovlp) -> double;
+
 }  // namespace ashera::detail
 
 #endif /* ASHERA_DETAIL_OVERLAP_HPP_ */

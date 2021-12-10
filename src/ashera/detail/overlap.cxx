@@ -62,4 +62,13 @@ auto ReverseOverlap(biosoup::Overlap const& ovlp) -> biosoup::Overlap {
   /* clang-format on */
 }
 
+auto OverlapLength(biosoup::Overlap const& ovlp) -> std::uint32_t {
+  return std::max(ovlp.rhs_end - ovlp.rhs_begin, ovlp.lhs_end - ovlp.lhs_begin);
+}
+
+auto OverlapScore(biosoup::Overlap const& ovlp) -> double {
+  return ((2. * OverlapLength(ovlp)) * ovlp.score) /
+         (OverlapLength(ovlp) + ovlp.score);
+}
+
 }  // namespace ashera::detail
