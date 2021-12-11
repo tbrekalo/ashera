@@ -12,6 +12,7 @@
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "biosoup/timer.hpp"
 #include "detail/overlap.hpp"
@@ -42,8 +43,6 @@ auto CreateMinimizerEngine(std::shared_ptr<thread_pool::ThreadPool> thread_pool,
 
 class BaseCoverage {
  public:
-  auto AnoteMatch() noexcept { ++hit_cnt_; }
-
   auto AnoteMismatch(char const base, std::uint32_t const read_id) -> void {
     for (auto base_idx = 0U; base_idx < kNBases; ++base_idx) {
       if (base == kBaseForIndex[base_idx]) {
@@ -51,15 +50,9 @@ class BaseCoverage {
         mismatch_ids_.emplace_back(base_idx, read_id);
       }
     }
-
-    ++hit_cnt_;
   }
 
-  auto HitCount() const noexcept -> std::uint16_t { return hit_cnt_; }
-
-  auto GetSnps(std::uint16_t const lo_snp,
-               std::uint16_t mismatches_cnt_hi) const
-      -> std::vector<std::uint32_t> {
+  auto GetSnps() const -> std::vector<std::uint32_t> {
     auto dst = std::vector<std::uint32_t>();
 
     auto indices = std::array<std::uint8_t, kNBases>{0, 1, 2, 3};
@@ -68,11 +61,10 @@ class BaseCoverage {
                 return mismatch_cnt_[lhs] > mismatch_cnt_[rhs];
               });
 
-    auto const mismatches_cnt =
-        std::accumulate(mismatch_cnt_.begin(), mismatch_cnt_.end(), 0U);
+    // auto const mismatches_cnt = 
 
     auto const& cand = mismatch_cnt_[indices.front()];
-    if (cand >= lo_snp && mismatches_cnt < mismatches_cnt_hi) {
+    if (cand >= 3 && cand >= mismatch_cnt_[indices[1]]) {
       for (auto const& it : mismatch_ids_) {
         dst.push_back(it.second);
       }
@@ -88,7 +80,6 @@ class BaseCoverage {
   static constexpr std::array<char, kNBases> kBaseForIndex = {'A', 'T', 'C',
                                                               'G'};
 
-  std::uint16_t hit_cnt_;
   std::array<std::uint16_t, kNBases> mismatch_cnt_;
   std::vector<std::pair<std::uint32_t, std::uint32_t>> mismatch_ids_;
 };
@@ -147,10 +138,9 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
       return std::make_pair(std::move(target), result);
     };
 
-    auto const calculate_coverage =
-        [&](std::uint32_t const query_id) -> std::vector<detail::BaseCoverage> {
-      auto dst =
-          std::vector<detail::BaseCoverage>(reads[query_id]->inflated_len);
+    auto const calculate_coverage = [&](std::uint32_t const query_id)
+        -> std::unordered_map<std::uint32_t, detail::BaseCoverage> {
+      auto dst = std::unordered_map<std::uint32_t, detail::BaseCoverage>();
 
       for (auto const& ovlp : overlaps[query_id]) {
         auto const [target, edlibResult] = align_sequences(ovlp);
@@ -165,7 +155,6 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
               ++query_pos;
               ++target_pos;
 
-              dst[query_pos].AnoteMatch();
               break;
             }
             case 3: {  // mismatch
@@ -193,42 +182,17 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
     };
 
     auto detect_snp_variants =
-        [&](std::uint32_t const query_id) -> std::vector<std::uint32_t> {
-      auto coverage_vec = calculate_coverage(query_id);
-      auto const average_coverage =
-          std::accumulate(
-              coverage_vec.begin(), coverage_vec.end(), 0U,
-              [](std::uint32_t const sum, detail::BaseCoverage const& covg)
-                  -> std::uint32_t { return sum + covg.HitCount(); }) /
-          coverage_vec.size();
+        [&](std::uint32_t const query_id) -> std::unordered_set<std::uint32_t> {
+      auto coverage_map = calculate_coverage(query_id);
+      auto snp_reads = std::unordered_set<std::uint32_t>();
 
-      auto const snp_lo = static_cast<std::uint16_t>(3U);
-      auto const mismatch_hi =
-          static_cast<std::uint16_t>(std::round(0.33 * average_coverage));
-
-      auto snp_reads = std::vector<std::uint32_t>();
-      snp_reads.reserve(average_coverage * 3);
-
-      auto trigger_len = 2 * average_coverage;
-      auto leave_unique = [&]() -> void {
-        std::sort(snp_reads.begin(), snp_reads.end());
-        snp_reads.erase(std::unique(snp_reads.begin(), snp_reads.end()),
-                        snp_reads.end());
-
-        trigger_len = 1.5 * snp_reads.size();
-      };
-
-      for (auto i = 0; i < coverage_vec.size(); ++i) {
-        auto const snps = coverage_vec[i].GetSnps(snp_lo, mismatch_hi);
-        std::copy(snps.cbegin(), snps.cend(), std::back_inserter(snp_reads));
-        coverage_vec[i].ClearMismatchIds();
-
-        if (snp_reads.size() >= trigger_len) {
-          leave_unique();
-        }
+      for (auto& [pos, coverage] : coverage_map) {
+        auto const snps = coverage.GetSnps();
+        std::copy(snps.cbegin(), snps.cend(),
+                  std::inserter(snp_reads, snp_reads.end()));
+        coverage.ClearMismatchIds();
       }
 
-      leave_unique();
       return snp_reads;
     };
 
@@ -344,21 +308,22 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
       for (auto id = covg_batch_begin; id < covg_batch_end; ++id) {
         covg_futures.emplace_back(thread_pool_->Submit(
             [&](std::uint32_t const& query_id) -> void {
-              auto const snp_variants = detect_snp_variants(id);
+              auto const snp_variants = detect_snp_variants(query_id);
               auto const is_snp_varaint =
                   [&snp_variants](std::uint32_t const target_id) -> bool {
-                return std::lower_bound(snp_variants.cbegin(),
-                                        snp_variants.cend(),
-                                        target_id) != snp_variants.end();
+                return snp_variants.find(target_id) != snp_variants.end();
               };
 
-              overlaps[query_id].erase(
-                  std::remove_if(overlaps[query_id].begin(),
-                                 overlaps[query_id].end(),
-                                 [&](biosoup::Overlap const& ovlp) -> bool {
-                                   return is_snp_varaint(ovlp.rhs_id);
-                                 }),
-                  overlaps[query_id].end());
+              auto const remove_begin = std::remove_if(
+                  overlaps[query_id].begin(), overlaps[query_id].end(),
+                  [&](biosoup::Overlap const& ovlp) -> bool {
+                    return is_snp_varaint(ovlp.rhs_id);
+                  });
+
+              ovlp_discard_cnt +=
+                  std::distance(remove_begin, overlaps[query_id].end());
+
+              overlaps[query_id].erase(remove_begin, overlaps[query_id].end());
               overlaps[query_id].shrink_to_fit();
             },
             id));
@@ -378,10 +343,11 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
       covg_batch_begin = covg_batch_end;
     }
 
-    fmt::print(stderr,
-               FMT_COMPILE(
-                   "[ashera::Engine::Correct] discarded {} out of {} overlaps"),
-               ovlp_discard_cnt, ovlp_cnt);
+    fmt::print(
+        stderr,
+        FMT_COMPILE(
+            "[ashera::Engine::Correct] discarded {} out of {} overlaps\n"),
+        ovlp_discard_cnt, ovlp_cnt);
   }
 
   return {};
