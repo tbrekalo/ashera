@@ -19,7 +19,6 @@
 #include "edlib.h"
 #include "fmt/compile.h"
 #include "fmt/core.h"
-#include "mimalloc.h"
 #include "racon/polisher.hpp"
 #include "ram/minimizer_engine.hpp"
 
@@ -61,10 +60,14 @@ class BaseCoverage {
                 return mismatch_cnt_[lhs] > mismatch_cnt_[rhs];
               });
 
-    // auto const mismatches_cnt = 
+    auto const mismatches_cnt = std::accumulate(
+        std::next(indices.begin()), indices.end(), 0U,
+        [&](std::uint32_t const init, std::uint8_t idx) -> std::uint32_t {
+          return init + mismatch_cnt_[idx];
+        });
 
     auto const& cand = mismatch_cnt_[indices.front()];
-    if (cand >= 3 && cand >= mismatch_cnt_[indices[1]]) {
+    if (cand >= 3 + mismatches_cnt) {
       for (auto const& it : mismatch_ids_) {
         dst.push_back(it.second);
       }

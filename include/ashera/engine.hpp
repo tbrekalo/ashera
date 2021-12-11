@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "biosoup/nucleic_acid.hpp"
+#include "mimalloc-override.h"
+#include "mimalloc.h"
 #include "thread_pool/thread_pool.hpp"
 
 namespace ashera {
@@ -31,7 +33,8 @@ class Engine {
   /**
    * @brief construct read correction engine
    */
-  Engine(std::shared_ptr<thread_pool::ThreadPool> thread_pool, std::uint32_t win_size);
+  Engine(std::shared_ptr<thread_pool::ThreadPool> thread_pool,
+         std::uint32_t win_size);
 
   // disable copying
   Engine(Engine const&) = delete;
