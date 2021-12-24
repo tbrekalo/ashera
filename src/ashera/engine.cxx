@@ -107,14 +107,52 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
     -> std::vector<std::unique_ptr<biosoup::NucleicAcid>> {
   auto timer = biosoup::Timer();
 
-  auto overlaps = std::vector<std::vector<biosoup::Overlap>>(reads.size());
+  timer.Start();
+  auto overlaps = MapSequences(reads);
+  fmt::print(
+      stderr,
+      FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : found {} overlaps\n"),
+      timer.Stop(), overlaps.size());
+
+  auto overlap_alignment =
+      std::vector<std::pair<biosoup::Overlap, EdlibAlignResult>>(reads.size());
 
   timer.Start();
 
-  {
-    auto minimizer_engine =
-        detail::CreateMinimizerEngine(thread_pool_, MinimapParams());
+  for (auto& ovlp_vec : overlaps) {
+    std::sort(
+        ovlp_vec.begin(), ovlp_vec.end(),
+        [&](biosoup::Overlap const& lhs, biosoup::Overlap const& rhs) -> bool {
+          return detail::OverlapScore(lhs) > detail::OverlapScore(rhs);
+        });
 
+    // ovlp_vec.resize((ovlp_vec.size() * 2) / 3);
+    if (ovlp_vec.size() > 16) {
+      ovlp_vec.resize(16);
+      ovlp_vec.shrink_to_fit();
+    }
+  }
+
+  fmt::print(
+      stderr,
+      FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : updated overlaps\n"),
+      timer.Stop());
+
+  timer.Start();
+
+  auto const find_batch_end_idx =
+      [&reads](std::size_t const begin_idx, std::size_t const end_idx,
+               std::uint64_t const kBackCapacity) -> std::size_t {
+    auto sum = 0UL;
+    auto curr_idx = begin_idx;
+    while (sum < kBackCapacity && curr_idx < end_idx) {
+      sum += reads[curr_idx++]->inflated_len;
+    }
+
+    return curr_idx;
+  };
+
+  {
     auto const align_sequences = [&](biosoup::Overlap const& ovlp)
         -> std::pair<std::string, EdlibAlignResult> {
       auto const get_target = [&]() {
@@ -191,6 +229,7 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
 
       for (auto& [pos, coverage] : coverage_map) {
         auto const snps = coverage.GetSnps();
+
         std::copy(snps.cbegin(), snps.cend(),
                   std::inserter(snp_reads, snp_reads.end()));
         coverage.ClearMismatchIds();
@@ -199,100 +238,7 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
       return snp_reads;
     };
 
-    auto const store_overlap = [&](biosoup::Overlap const& ovlp) -> void {
-      overlaps[ovlp.lhs_id].push_back(ovlp);
-      overlaps[ovlp.rhs_id].push_back(detail::ReverseOverlap(ovlp));
-    };
-
-    auto const find_batch_end_idx =
-        [&reads](std::size_t const begin_idx, std::size_t const end_idx,
-                 std::uint64_t const kBackCapacity) -> std::size_t {
-      auto sum = 0UL;
-      auto curr_idx = begin_idx;
-      while (sum < kBackCapacity && curr_idx < end_idx) {
-        sum += reads[curr_idx++]->inflated_len;
-      }
-
-      return curr_idx;
-    };
-
-    auto map_batch_futures =
-        std::vector<std::future<std::vector<biosoup::Overlap>>>();
-    auto const map_batch = [&](std::size_t const batch_begin,
-                               std::size_t const batch_end,
-                               auto&& ovlp_sink) -> void {
-      static_assert(
-          detail::IsOverlapSinkV<decltype(ovlp_sink)>,
-          "ovlp_filer must satisfy ovlp_sink(biosoup::overlap) -> void");
-
-      for (auto i = batch_begin; i < batch_end; ++i) {
-        map_batch_futures.emplace_back(thread_pool_->Submit(
-            [&](std::size_t const idx) -> std::vector<biosoup::Overlap> {
-              return minimizer_engine.Map(reads[idx], true, true);
-            },
-            i));
-      }
-
-      for (auto& future : map_batch_futures) {
-        for (auto&& ovlp : future.get()) {
-          ovlp_sink(ovlp);
-        }
-      }
-
-      map_batch_futures.clear();
-    };
-
-    for (auto minimize_batch_begin = 0UL;
-         minimize_batch_begin < reads.size();) {
-      auto const minimize_batch_end = find_batch_end_idx(
-          minimize_batch_begin, reads.size(), detail::kMinimizeBatchCap);
-
-      minimizer_engine.Minimize(std::next(reads.cbegin(), minimize_batch_begin),
-                                std::next(reads.cbegin(), minimize_batch_end),
-                                true);
-      minimizer_engine.Filter(detail::kFilterFrequency);
-
-      fmt::print(
-          stderr,
-          FMT_COMPILE(
-              "[ashera::Engine::Correct]({:12.3f}) : minimized {} sequences\n"),
-          timer.Stop(), (minimize_batch_end - minimize_batch_begin));
-
-      for (auto map_batch_begin = 0; map_batch_begin < minimize_batch_end;) {
-        auto const map_batch_end = find_batch_end_idx(
-            map_batch_begin, minimize_batch_end, detail::kMapBatchCap);
-
-        timer.Start();
-        map_batch(minimize_batch_begin, minimize_batch_end, store_overlap);
-
-        fmt::print(
-            stderr,
-            FMT_COMPILE(
-                "[ashera::Engine::Correct]({:12.3f}) : mapped {} sequences\n"),
-            timer.Stop(), (map_batch_end - map_batch_begin));
-
-        map_batch_begin = map_batch_end;
-      }
-
-      minimize_batch_begin = minimize_batch_end;
-    }
-
     timer.Start();
-
-    for (auto& ovlp_vec : overlaps) {
-      std::sort(ovlp_vec.begin(), ovlp_vec.end(),
-                [&](biosoup::Overlap const& lhs,
-                    biosoup::Overlap const& rhs) -> bool {
-                  return detail::OverlapScore(lhs) > detail::OverlapScore(rhs);
-                });
-
-      ovlp_vec.resize((ovlp_vec.size() * 2) / 3);
-    }
-
-    fmt::print(
-        stderr,
-        FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : updated overlaps\n"),
-        timer.Stop());
 
     auto const ovlp_cnt = std::accumulate(
         overlaps.cbegin(), overlaps.cend(), 0ULL,
@@ -355,5 +301,102 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
 
   return {};
 }
+
+auto Engine::MapSequences(
+    std::vector<std::unique_ptr<biosoup::NucleicAcid>> const& reads)
+    -> std::vector<std::vector<biosoup::Overlap>> {
+  auto dst = std::vector<std::vector<biosoup::Overlap>>(reads.size());
+  auto timer = biosoup::Timer();
+
+  {
+    auto minimizer_engine =
+        detail::CreateMinimizerEngine(thread_pool_, MinimapParams());
+
+    auto const store_overlap = [&](biosoup::Overlap const& ovlp) -> void {
+      dst[ovlp.lhs_id].push_back(ovlp);
+      dst[ovlp.rhs_id].push_back(detail::ReverseOverlap(ovlp));
+    };
+
+    auto const find_batch_end_idx =
+        [&reads](std::size_t const begin_idx, std::size_t const end_idx,
+                 std::uint64_t const kBackCapacity) -> std::size_t {
+      auto sum = 0UL;
+      auto curr_idx = begin_idx;
+      while (sum < kBackCapacity && curr_idx < end_idx) {
+        sum += reads[curr_idx++]->inflated_len;
+      }
+
+      return curr_idx;
+    };
+
+    auto map_batch_futures =
+        std::vector<std::future<std::vector<biosoup::Overlap>>>();
+    auto const map_batch = [&](std::size_t const batch_begin,
+                               std::size_t const batch_end,
+                               auto&& ovlp_sink) -> void {
+      static_assert(
+          detail::IsOverlapSinkV<decltype(ovlp_sink)>,
+          "ovlp_filer must satisfy ovlp_sink(biosoup::overlap) -> void");
+
+      for (auto i = batch_begin; i < batch_end; ++i) {
+        map_batch_futures.emplace_back(thread_pool_->Submit(
+            [&](std::size_t const idx) -> std::vector<biosoup::Overlap> {
+              return minimizer_engine.Map(reads[idx], true, true);
+            },
+            i));
+      }
+
+      for (auto& future : map_batch_futures) {
+        for (auto&& ovlp : future.get()) {
+          ovlp_sink(ovlp);
+        }
+      }
+
+      map_batch_futures.clear();
+    };
+
+    for (auto minimize_batch_begin = 0UL;
+         minimize_batch_begin < reads.size();) {
+      auto const minimize_batch_end = find_batch_end_idx(
+          minimize_batch_begin, reads.size(), detail::kMinimizeBatchCap);
+
+      minimizer_engine.Minimize(std::next(reads.cbegin(), minimize_batch_begin),
+                                std::next(reads.cbegin(), minimize_batch_end),
+                                true);
+      minimizer_engine.Filter(detail::kFilterFrequency);
+
+      fmt::print(stderr,
+                 FMT_COMPILE("[ashera::Engine::MapSequences]({:12.3f}) : "
+                             "minimized {} sequences\n"),
+                 timer.Stop(), (minimize_batch_end - minimize_batch_begin));
+
+      for (auto map_batch_begin = 0; map_batch_begin < minimize_batch_end;) {
+        auto const map_batch_end = find_batch_end_idx(
+            map_batch_begin, minimize_batch_end, detail::kMapBatchCap);
+
+        timer.Start();
+        map_batch(minimize_batch_begin, minimize_batch_end, store_overlap);
+
+        fmt::print(stderr,
+                   FMT_COMPILE("[ashera::Engine::MapSequences]({:12.3f}) : "
+                               "mapped {} sequences\n"),
+                   timer.Stop(), (map_batch_end - map_batch_begin));
+
+        map_batch_begin = map_batch_end;
+      }
+
+      minimize_batch_begin = minimize_batch_end;
+    }
+  }
+
+  return dst;
+}
+
+// auto Engine::PruneLowQualityOvlps(
+//     std::vector<std::vector<biosoup::Overlap>>&& overlaps)
+//     -> std::vector<std::vector<biosoup::Overlap>> {
+//
+//   return overlaps;
+// }
 
 }  // namespace ashera

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "biosoup/nucleic_acid.hpp"
+#include "biosoup/overlap.hpp"
 #include "mimalloc-override.h"
 #include "mimalloc.h"
 #include "thread_pool/thread_pool.hpp"
@@ -51,6 +52,14 @@ class Engine {
       -> std::vector<std::unique_ptr<biosoup::NucleicAcid>>;
 
  private:
+  auto MapSequences(
+      std::vector<std::unique_ptr<biosoup::NucleicAcid>> const& reads)
+      -> std::vector<std::vector<biosoup::Overlap>>;
+
+  // auto PruneLowQualityOvlps(
+  //     std::vector<std::vector<biosoup::Overlap>>&& overlaps)
+  //     -> std::vector<std::vector<biosoup::Overlap>>;
+
   std::shared_ptr<thread_pool::ThreadPool> thread_pool_;
   std::uint32_t win_size_;
 };
