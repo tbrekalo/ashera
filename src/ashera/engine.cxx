@@ -95,83 +95,82 @@ class BaseCoverage {
   auto dst = std::vector<std::vector<biosoup::Overlap>>(reads.size());
   auto timer = biosoup::Timer();
 
-  {
-    auto minimizer_engine = CreateMinimizerEngine(thread_pool, MinimapParams());
+  auto minimizer_engine = CreateMinimizerEngine(thread_pool, MinimapParams());
 
-    auto const store_overlap = [&](biosoup::Overlap const& ovlp) -> void {
-      dst[ovlp.lhs_id].push_back(ovlp);
-      dst[ovlp.rhs_id].push_back(detail::ReverseOverlap(ovlp));
-    };
+  auto const store_overlap = [&](biosoup::Overlap const& ovlp) -> void {
+    dst[ovlp.lhs_id].push_back(ovlp);
+    dst[ovlp.rhs_id].push_back(detail::ReverseOverlap(ovlp));
+  };
 
-    auto const find_batch_end_idx =
-        [&reads](std::size_t const begin_idx, std::size_t const end_idx,
-                 std::uint64_t const kBackCapacity) -> std::size_t {
-      auto sum = 0UL;
-      auto curr_idx = begin_idx;
-      while (sum < kBackCapacity && curr_idx < end_idx) {
-        sum += reads[curr_idx++]->inflated_len;
+  auto const find_batch_end_idx =
+      [&reads](std::size_t const begin_idx, std::size_t const end_idx,
+               std::uint64_t const kBackCapacity) -> std::size_t {
+    auto sum = 0UL;
+    auto curr_idx = begin_idx;
+    while (sum < kBackCapacity && curr_idx < end_idx) {
+      sum += reads[curr_idx++]->inflated_len;
+    }
+
+    return curr_idx;
+  };
+
+  auto map_batch_futures =
+      std::vector<std::future<std::vector<biosoup::Overlap>>>();
+  auto const map_batch = [&](std::size_t const batch_begin,
+                             std::size_t const batch_end,
+                             auto&& ovlp_sink) -> void {
+    static_assert(
+        detail::IsOverlapSinkV<decltype(ovlp_sink)>,
+        "ovlp_filer must satisfy ovlp_sink(biosoup::overlap) -> void");
+
+    for (auto i = batch_begin; i < batch_end; ++i) {
+      map_batch_futures.emplace_back(thread_pool->Submit(
+          [&](std::size_t const idx) -> std::vector<biosoup::Overlap> {
+            return minimizer_engine.Map(reads[idx], true, true);
+          },
+          i));
+    }
+
+    for (auto& future : map_batch_futures) {
+      for (auto&& ovlp : future.get()) {
+        ovlp_sink(ovlp);
       }
+    }
 
-      return curr_idx;
-    };
+    map_batch_futures.clear();
+  };
 
-    auto map_batch_futures =
-        std::vector<std::future<std::vector<biosoup::Overlap>>>();
-    auto const map_batch = [&](std::size_t const batch_begin,
-                               std::size_t const batch_end,
-                               auto&& ovlp_sink) -> void {
-      static_assert(
-          detail::IsOverlapSinkV<decltype(ovlp_sink)>,
-          "ovlp_filer must satisfy ovlp_sink(biosoup::overlap) -> void");
+  for (auto minimize_batch_begin = 0U; minimize_batch_begin < reads.size();) {
+    timer.Start();
+    auto const minimize_batch_end = find_batch_end_idx(
+        minimize_batch_begin, reads.size(), detail::kMinimizeBatchCap);
 
-      for (auto i = batch_begin; i < batch_end; ++i) {
-        map_batch_futures.emplace_back(thread_pool->Submit(
-            [&](std::size_t const idx) -> std::vector<biosoup::Overlap> {
-              return minimizer_engine.Map(reads[idx], true, true);
-            },
-            i));
-      }
+    minimizer_engine.Minimize(std::next(reads.cbegin(), minimize_batch_begin),
+                              std::next(reads.cbegin(), minimize_batch_end),
+                              true);
+    minimizer_engine.Filter(detail::kFilterFrequency);
 
-      for (auto& future : map_batch_futures) {
-        for (auto&& ovlp : future.get()) {
-          ovlp_sink(ovlp);
-        }
-      }
+    fmt::print(stderr,
+               FMT_COMPILE("[ashera::detail::MapSequences]({:12.3f}) : "
+                           "minimized {} sequences\n"),
+               timer.Stop(), (minimize_batch_end - minimize_batch_begin));
 
-      map_batch_futures.clear();
-    };
+    for (auto map_batch_begin = 0; map_batch_begin < minimize_batch_end;) {
+      auto const map_batch_end = find_batch_end_idx(
+          map_batch_begin, minimize_batch_end, detail::kMapBatchCap);
 
-    for (auto minimize_batch_begin = 0U; minimize_batch_begin < reads.size();) {
-      auto const minimize_batch_end = find_batch_end_idx(
-          minimize_batch_begin, reads.size(), detail::kMinimizeBatchCap);
-
-      minimizer_engine.Minimize(std::next(reads.cbegin(), minimize_batch_begin),
-                                std::next(reads.cbegin(), minimize_batch_end),
-                                true);
-      minimizer_engine.Filter(detail::kFilterFrequency);
+      timer.Start();
+      map_batch(minimize_batch_begin, minimize_batch_end, store_overlap);
 
       fmt::print(stderr,
                  FMT_COMPILE("[ashera::detail::MapSequences]({:12.3f}) : "
-                             "minimized {} sequences\n"),
-                 timer.Stop(), (minimize_batch_end - minimize_batch_begin));
+                             "mapped {} sequences\n"),
+                 timer.Stop(), (map_batch_end - map_batch_begin));
 
-      for (auto map_batch_begin = 0; map_batch_begin < minimize_batch_end;) {
-        auto const map_batch_end = find_batch_end_idx(
-            map_batch_begin, minimize_batch_end, detail::kMapBatchCap);
-
-        timer.Start();
-        map_batch(minimize_batch_begin, minimize_batch_end, store_overlap);
-
-        fmt::print(stderr,
-                   FMT_COMPILE("[ashera::detail::MapSequences]({:12.3f}) : "
-                               "mapped {} sequences\n"),
-                   timer.Stop(), (map_batch_end - map_batch_begin));
-
-        map_batch_begin = map_batch_end;
-      }
-
-      minimize_batch_begin = minimize_batch_end;
+      map_batch_begin = map_batch_end;
     }
+
+    minimize_batch_begin = minimize_batch_end;
   }
 
   return dst;
@@ -183,6 +182,9 @@ class BaseCoverage {
     std::vector<std::unique_ptr<biosoup::NucleicAcid>> const& reads,
     std::vector<std::vector<biosoup::Overlap>> overlaps)
     -> std::vector<std::vector<std::pair<biosoup::Overlap, EdlibAlignResult>>> {
+  // TODO: remove after loging
+  auto snp_annotations = std::vector<std::vector<std::uint32_t>>(reads.size());
+
   auto const find_batch_end_idx =
       [&reads](std::size_t const begin_idx, std::size_t const end_idx,
                std::uint64_t const kBackCapacity) -> std::size_t {
@@ -285,13 +287,17 @@ class BaseCoverage {
       auto const [query_str, target_str] = overlap_strings(ovlp);
       auto const alignment = align_strings(query_str, target_str);
       coverage.merge(annote_mismatches(ovlp, target_str, alignment));
+
+      overlaps_alignments.emplace_back(ovlp, alignment);
     }
 
     return std::make_pair(overlaps_alignments, coverage);
   };
 
   auto const detect_snp_variants =
-      [](std::unordered_map<std::uint32_t, detail::BaseCoverage> coverage_map)
+      [&snp_annotations](
+          [[maybe_unused]] std::uint32_t query_id,
+          std::unordered_map<std::uint32_t, detail::BaseCoverage> coverage_map)
       -> std::unordered_set<std::uint32_t> {
     auto dst = std::unordered_set<std::uint32_t>();
 
@@ -299,19 +305,25 @@ class BaseCoverage {
       auto const snps = coverage.GetSnps();
       std::copy(snps.cbegin(), snps.cend(), std::inserter(dst, dst.end()));
       coverage.ClearMismatchIds();
+
+      // TODO: clean up after loggin
+      snp_annotations[query_id].push_back(pos);
     }
 
     return dst;
   };
 
   auto const transform_and_filter_overlaps =
-      [&overlaps_to_alignment_coverage,
-       &detect_snp_variants](std::vector<biosoup::Overlap> overlaps)
+      [&overlaps_to_alignment_coverage, &detect_snp_variants](
+          [[maybe_unused]] std::uint32_t const query_id,
+          std::vector<biosoup::Overlap> overlaps)
       -> std::vector<std::pair<biosoup::Overlap, EdlibAlignResult>> {
     auto [ovlp_align, coverage_map] =
         overlaps_to_alignment_coverage(std::move(overlaps));
 
-    auto const snp_variants = detect_snp_variants(std::move(coverage_map));
+    auto const snp_variants =
+        detect_snp_variants(query_id, std::move(coverage_map));
+
     auto const is_snp_variant =
         [&snp_variants](std::uint32_t const target_id) -> bool {
       return snp_variants.find(target_id) != snp_variants.end();
@@ -344,10 +356,8 @@ class BaseCoverage {
         find_batch_end_idx(align_batch_begin, overlaps.size(), kAlignBatchCap);
 
     for (auto id = align_batch_begin; id < align_batch_end; ++id) {
-      align_futures.emplace_back(
-
-          thread_pool->Submit(transform_and_filter_overlaps,
-                              std::move(overlaps[id]))
+      align_futures.emplace_back(thread_pool->Submit(
+          transform_and_filter_overlaps, id, std::move(overlaps[id]))
 
       );
     }
@@ -365,6 +375,24 @@ class BaseCoverage {
     align_batch_begin = align_batch_end;
     align_futures.clear();
   }
+
+  auto snp_ostrm = std::ofstream("./snp_annotations.txt");
+  for (auto read_id = 0U; read_id < reads.size(); ++read_id) {
+    if (!snp_annotations[read_id].empty()) {
+      std::sort(snp_annotations[read_id].begin(),
+                snp_annotations[read_id].end());
+
+      snp_ostrm << read_id << ' ';
+      for (auto const it : snp_annotations[read_id]) {
+        snp_ostrm << it << ' ';
+      }
+
+      snp_ostrm << '\n';
+    }
+  }
+
+  std::flush(snp_ostrm);
+  snp_ostrm.close();
 
   return dst;
 }
@@ -404,7 +432,6 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
           return detail::OverlapScore(lhs) > detail::OverlapScore(rhs);
         });
 
-    // ovlp_vec.resize((ovlp_vec.size() * 2) / 3);
     if (ovlp_vec.size() > 16) {
       ovlp_vec.resize(16);
       ovlp_vec.shrink_to_fit();
