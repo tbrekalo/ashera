@@ -415,7 +415,7 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
       thread_pool_, reads, std::move(overlaps));
 
   fmt::print(stderr, FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : "
-                                 "generated valid alignment subsets"));
+                                 "generated valid alignment subsets"), timer.Stop());
 
   return {};
 }
