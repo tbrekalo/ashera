@@ -153,7 +153,7 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
   };
 
   {
-    auto const align_sequences = [&](biosoup::Overlap const& ovlp)
+    auto const align_sequences_v0 = [&](biosoup::Overlap const& ovlp)
         -> std::pair<std::string, EdlibAlignResult> {
       auto const get_target = [&]() {
         auto const inflated_data = reads[ovlp.rhs_id]->InflateData(
@@ -168,7 +168,7 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
         }
       };
 
-      auto const query = reads[ovlp.rhs_id]->InflateData(
+      auto const query = reads[ovlp.lhs_id]->InflateData(
           ovlp.lhs_begin, ovlp.lhs_end - ovlp.lhs_begin);
 
       auto target = get_target();
@@ -184,7 +184,7 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
       auto dst = std::unordered_map<std::uint32_t, detail::BaseCoverage>();
 
       for (auto const& ovlp : overlaps[query_id]) {
-        auto const [target, edlibResult] = align_sequences(ovlp);
+        auto const [target, edlibResult] = align_sequences_v0(ovlp);
         auto const target_id = ovlp.rhs_id;
 
         auto query_pos = ovlp.lhs_begin;
