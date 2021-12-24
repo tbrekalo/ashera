@@ -344,19 +344,26 @@ class BaseCoverage {
         find_batch_end_idx(align_batch_begin, overlaps.size(), kAlignBatchCap);
 
     for (auto id = align_batch_begin; id < align_batch_end; ++id) {
-      thread_pool->Submit(transform_and_filter_overlaps,
-                          std::move(overlaps[id]));
+      align_futures.emplace_back(
+
+          thread_pool->Submit(transform_and_filter_overlaps,
+                              std::move(overlaps[id]))
+
+      );
+    }
+
+    for (auto& it : align_futures) {
+      dst.emplace_back(it.get());
     }
 
     fmt::print(
         stderr,
         FMT_COMPILE("[ashera::detail::OverlapsToSnpFreeAligments]({:12.3f}) :"
-                    " aligned and filtered {} overlaps"),
+                    " aligned and filtered {} overlaps\n"),
         timer.Stop(), align_batch_end - align_batch_begin);
 
-    for (auto& it : align_futures) {
-      dst.emplace_back(it.get());
-    }
+    align_batch_begin = align_batch_end;
+    align_futures.clear();
   }
 
   return dst;
@@ -414,8 +421,10 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
   auto overlaps_alignmetns = detail::OverlapsToSnpFreeAligments(
       thread_pool_, reads, std::move(overlaps));
 
-  fmt::print(stderr, FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : "
-                                 "generated valid alignment subsets"), timer.Stop());
+  fmt::print(stderr,
+             FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : "
+                         "generated valid alignment subsets\n"),
+             timer.Stop());
 
   return {};
 }
