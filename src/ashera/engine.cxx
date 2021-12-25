@@ -4,13 +4,9 @@
 #include <array>
 #include <cstdlib>
 #include <fstream>
-#include <iomanip>
-#include <iostream>
 #include <iterator>
 #include <memory>
 #include <numeric>
-#include <optional>
-#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -54,8 +50,8 @@ class BaseCoverage {
 
   [[nodiscard]] auto GetSnps() const -> std::vector<std::uint32_t> {
     auto dst = std::vector<std::uint32_t>();
-
     auto indices = std::array<std::uint8_t, kNBases>{0, 1, 2, 3};
+
     std::sort(indices.begin(), indices.end(),
               [&](std::uint8_t const lhs, std::uint8_t const rhs) -> bool {
                 return mismatch_cnt_[lhs] > mismatch_cnt_[rhs];
@@ -67,10 +63,12 @@ class BaseCoverage {
           return init + mismatch_cnt_[idx];
         });
 
-    auto const& cand = mismatch_cnt_[indices.front()];
-    if (cand >= 3 + mismatches_cnt) {
+    auto const cand_cnt = mismatch_cnt_[indices.front()];
+    if (cand_cnt >= 3) {
       for (auto const& it : mismatch_ids_) {
-        dst.push_back(it.second);
+        if (it.first == indices.front()) {
+          dst.push_back(it.second);
+        }
       }
     }
 
@@ -80,12 +78,15 @@ class BaseCoverage {
   auto ClearMismatchIds() -> void { mismatch_ids_.clear(); }
 
  private:
+  /* clang-format off */
   static constexpr auto kNBases = 4;
-  static constexpr std::array<char, kNBases> kBaseForIndex = {'A', 'T', 'C',
-                                                              'G'};
+  static constexpr std::array<char, kNBases> kBaseForIndex = {
+    'A', 'T', 'C', 'G'
+  };
+  /* clang-format on */
 
-  std::array<std::uint16_t, kNBases> mismatch_cnt_;
-  std::vector<std::pair<std::uint32_t, std::uint32_t>> mismatch_ids_;
+  std::array<std::uint32_t, kNBases> mismatch_cnt_;
+  std::vector<std::pair<std::uint8_t, std::uint32_t>> mismatch_ids_;
 };
 
 [[nodiscard]] auto MapSequences(
@@ -303,11 +304,13 @@ class BaseCoverage {
 
     for (auto& [pos, coverage] : coverage_map) {
       auto const snps = coverage.GetSnps();
+      if (!snps.empty()) {
+        // TODO: clean up after loggin
+        snp_annotations[query_id].push_back(pos);
+      }
+
       std::copy(snps.cbegin(), snps.cend(), std::inserter(dst, dst.end()));
       coverage.ClearMismatchIds();
-
-      // TODO: clean up after loggin
-      snp_annotations[query_id].push_back(pos);
     }
 
     return dst;
@@ -318,6 +321,10 @@ class BaseCoverage {
           [[maybe_unused]] std::uint32_t const query_id,
           std::vector<biosoup::Overlap> overlaps)
       -> std::vector<std::pair<biosoup::Overlap, EdlibAlignResult>> {
+    if (overlaps.empty()) {
+      return {};
+    }
+
     auto [ovlp_align, coverage_map] =
         overlaps_to_alignment_coverage(std::move(overlaps));
 
@@ -326,7 +333,8 @@ class BaseCoverage {
 
     auto const is_snp_variant =
         [&snp_variants](std::uint32_t const target_id) -> bool {
-      return snp_variants.find(target_id) != snp_variants.end();
+      return !snp_variants.empty() &&
+             snp_variants.find(target_id) != snp_variants.end();
     };
 
     auto const remove_begin = std::remove_if(
@@ -419,39 +427,53 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
 
   timer.Start();
   auto overlaps = detail::MapSequences(thread_pool_, reads);
+
+  auto const n_ovlps_before = std::accumulate(
+      overlaps.cbegin(), overlaps.cend(), 0U,
+      [](std::uint32_t const init, std::vector<biosoup::Overlap> const& vec)
+          -> std::uint32_t { return init + vec.size(); });
+
   fmt::print(
       stderr,
       FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : found {} overlaps\n"),
-      timer.Stop(), overlaps.size());
+      timer.Stop(), n_ovlps_before);
   timer.Start();
 
-  for (auto& ovlp_vec : overlaps) {
-    std::sort(
-        ovlp_vec.begin(), ovlp_vec.end(),
-        [&](biosoup::Overlap const& lhs, biosoup::Overlap const& rhs) -> bool {
-          return detail::OverlapScore(lhs) > detail::OverlapScore(rhs);
-        });
+  // for (auto& ovlp_vec : overlaps) {
+  //   std::sort(
+  //       ovlp_vec.begin(), ovlp_vec.end(),
+  //       [&](biosoup::Overlap const& lhs, biosoup::Overlap const& rhs) -> bool
+  //       {
+  //         return detail::OverlapScore(lhs) > detail::OverlapScore(rhs);
+  //       });
 
-    if (ovlp_vec.size() > 16) {
-      ovlp_vec.resize(16);
-      ovlp_vec.shrink_to_fit();
-    }
-  }
+  //   if (ovlp_vec.size() > 16) {
+  //     ovlp_vec.resize(16);
+  //     ovlp_vec.shrink_to_fit();
+  //   }
+  // }
 
-  fmt::print(stderr,
-             FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : discarded low "
-                         "quality overlaps\n"),
-             timer.Stop());
+  // fmt::print(stderr,
+  //            FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : discarded low
+  //            "
+  //                        "quality overlaps\n"),
+  //            timer.Stop());
 
-  timer.Start();
+  // timer.Start();
 
   auto overlaps_alignmetns = detail::OverlapsToSnpFreeAligments(
       thread_pool_, reads, std::move(overlaps));
 
+  auto const n_ovlps_after = std::accumulate(
+      overlaps_alignmetns.cbegin(), overlaps_alignmetns.cend(), 0U,
+      [](std::uint32_t const init,
+         std::vector<std::pair<biosoup::Overlap, EdlibAlignResult>> const& vec)
+          -> std::uint32_t { return init + vec.size(); });
+
   fmt::print(stderr,
              FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : "
-                         "generated valid alignment subsets\n"),
-             timer.Stop());
+                         "generated {} overlap alignment pairs\n"),
+             timer.Stop(), n_ovlps_after);
 
   return {};
 }
