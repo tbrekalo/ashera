@@ -359,7 +359,7 @@ class BaseCoverage {
 
     fmt::print(
         stderr,
-        FMT_COMPILE("[ashera::detail::OverlapsToSnpFreeAligments]({:12.3f}) :"
+        FMT_COMPILE("[ashera::detail::OverlapsFilterSnps]({:12.3f}) :"
                     " aligned and filtered {} overlaps\n"),
         timer.Stop(), align_batch_end - align_batch_begin);
 
@@ -407,7 +407,8 @@ auto FindSnpFreeOverlaps(
 
   fmt::print(
       stderr,
-      FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : found {} overlaps\n"),
+      FMT_COMPILE(
+          "[ashera::FindSnpFreeOverlaps]({:12.3f}) : found {} overlaps\n"),
       timer.Stop(), n_ovlps_before);
   timer.Start();
 
@@ -420,7 +421,7 @@ auto FindSnpFreeOverlaps(
           -> std::uint32_t { return init + vec.size(); });
 
   fmt::print(stderr,
-             FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : "
+             FMT_COMPILE("[ashera::Engine::FindSnpFreeOverlaps]({:12.3f}) : "
                          "generated {} overlap alignment pairs\n"),
              timer.Stop(), n_ovlps_after);
 
