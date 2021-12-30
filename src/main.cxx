@@ -14,9 +14,6 @@
 #include "fmt/core.h"
 
 int main(int argc, char** argv) {
-  fmt::print(stderr, FMT_COMPILE("[ashera] using mialloc version : {}\n"),
-             mi_version());
-
   try {
     auto options =
         cxxopts::Options("ashera", "Ashera is a read correction tool");

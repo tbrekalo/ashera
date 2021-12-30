@@ -13,17 +13,6 @@ set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fno-omit-frame-point
 include(FetchContent)
 include(cmake/Warnings.cmake)
 
-# find_package(mimalloc 2.0.3 QUIET)
-# if (NOT mimalloc_FOUND)
-  FetchContent_Declare(
-    mimalloc
-    GIT_REPOSITORY https://github.com/microsoft/mimalloc
-    GIT_TAG v2.0.3
-  )
-
-  FetchContent_MakeAvailable(mimalloc)
-# endif()
-
 find_package(cxxopts 3.0.0 QUIET)
 if (NOT cxxopts_FOUND)
   FetchContent_Declare(
@@ -57,22 +46,22 @@ if (NOT ram_FOUND)
   FetchContent_MakeAvailable(ram)
 endif()
 
-find_package(racon 1.4.21 QUIET)
-if (NOT racon_FOUND)
+find_package(spoa 4.0.7 QUIET)
+if (NOT spoa_FOUND)
   FetchContent_Declare(
-    racon   
-    GIT_REPOSITORY https://github.com/lbcb-sci/racon
-    GIT_TAG library
+    spoa 
+    GIT_REPOSITORY https://github.com/rvaser/spoa
+    GIT_TAG 4.0.7
   )
 
-  FetchContent_MakeAvailable(racon)
+  FetchContent_MakeAvailable(spoa)
 endif()
 
 find_package(biosoup 0.10.0 QUIET)
 if(NOT biosoup_FOUND)
   FetchContent_Declare(
     biosoup
-    GIT_REPOSITORY https://github.com/rvaser/biosoup/releases
+    GIT_REPOSITORY https://github.com/rvaser/biosoup
     GIT_TAG 0.10.0
   )
 
@@ -129,8 +118,8 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 17)
 set_default_warnings(${PROJECT_NAME} INTERFACE FALSE)
 
 target_link_libraries(${PROJECT_NAME} 
-  PUBLIC biosoup thread_pool mimalloc
-  PRIVATE bioparser ram fmt racon edlib)
+  PUBLIC biosoup thread_pool
+  PRIVATE bioparser edlib fmt spoa ram)
 
 add_executable(${PROJECT_NAME}_exe src/main.cxx)
 target_link_libraries(${PROJECT_NAME}_exe PRIVATE ${PROJECT_NAME} cxxopts fmt)

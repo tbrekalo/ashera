@@ -6,8 +6,6 @@
 #include <vector>
 
 #include "biosoup/nucleic_acid.hpp"
-#include "mimalloc-override.h"
-#include "mimalloc.h"
 #include "thread_pool/thread_pool.hpp"
 
 namespace ashera {

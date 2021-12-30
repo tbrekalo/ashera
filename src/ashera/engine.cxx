@@ -15,7 +15,6 @@
 #include "edlib.h"
 #include "fmt/compile.h"
 #include "fmt/core.h"
-#include "racon/polisher.hpp"
 #include "ram/minimizer_engine.hpp"
 
 namespace ashera {
@@ -50,23 +49,14 @@ class BaseCoverage {
 
   [[nodiscard]] auto GetSnps() const -> std::vector<std::uint32_t> {
     auto dst = std::vector<std::uint32_t>();
-    auto indices = std::array<std::uint8_t, kNBases>{0, 1, 2, 3};
+    auto const strongest_mismatch_idx = std::distance(
+        mismatch_cnt_.cbegin(),
+        std::max_element(mismatch_cnt_.cbegin(), mismatch_cnt_.cend()));
 
-    std::sort(indices.begin(), indices.end(),
-              [&](std::uint8_t const lhs, std::uint8_t const rhs) -> bool {
-                return mismatch_cnt_[lhs] > mismatch_cnt_[rhs];
-              });
-
-    auto const mismatches_cnt = std::accumulate(
-        std::next(indices.begin()), indices.end(), 0U,
-        [&](std::uint32_t const init, std::uint8_t idx) -> std::uint32_t {
-          return init + mismatch_cnt_[idx];
-        });
-
-    auto const cand_cnt = mismatch_cnt_[indices.front()];
+    auto const cand_cnt = mismatch_cnt_[strongest_mismatch_idx];
     if (cand_cnt >= 3) {
       for (auto const& it : mismatch_ids_) {
-        if (it.first == indices.front()) {
+        if (it.first == strongest_mismatch_idx) {
           dst.push_back(it.second);
         }
       }
@@ -439,28 +429,6 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
       timer.Stop(), n_ovlps_before);
   timer.Start();
 
-  // for (auto& ovlp_vec : overlaps) {
-  //   std::sort(
-  //       ovlp_vec.begin(), ovlp_vec.end(),
-  //       [&](biosoup::Overlap const& lhs, biosoup::Overlap const& rhs) -> bool
-  //       {
-  //         return detail::OverlapScore(lhs) > detail::OverlapScore(rhs);
-  //       });
-
-  //   if (ovlp_vec.size() > 16) {
-  //     ovlp_vec.resize(16);
-  //     ovlp_vec.shrink_to_fit();
-  //   }
-  // }
-
-  // fmt::print(stderr,
-  //            FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : discarded low
-  //            "
-  //                        "quality overlaps\n"),
-  //            timer.Stop());
-
-  // timer.Start();
-
   auto overlaps_alignmetns = detail::OverlapsToSnpFreeAligments(
       thread_pool_, reads, std::move(overlaps));
 
@@ -474,6 +442,23 @@ auto Engine::Correct(std::vector<std::unique_ptr<biosoup::NucleicAcid>>&& reads)
              FMT_COMPILE("[ashera::Engine::Correct]({:12.3f}) : "
                          "generated {} overlap alignment pairs\n"),
              timer.Stop(), n_ovlps_after);
+
+  for (auto& overlap_alignment_vec : overlaps_alignmetns) {
+    std::sort(
+        overlap_alignment_vec.begin(), overlap_alignment_vec.end(),
+        [](std::pair<biosoup::Overlap, EdlibAlignResult> const& lhs,
+           std::pair<biosoup::Overlap, EdlibAlignResult> const& rhs) -> bool {
+          return detail::OverlapScore(lhs.first) >
+                 detail::OverlapScore(rhs.first);
+        });
+    
+    // TODO: think of another filtering critiera
+    // maybe memory for each block or smth
+    if (overlap_alignment_vec.size() > 4U) {
+      overlap_alignment_vec.resize(4U);
+      overlap_alignment_vec.shrink_to_fit();
+    }
+  }
 
   return {};
 }
