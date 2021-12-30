@@ -6,7 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "ashera/engine.hpp"
+#include "ashera/algorithm.hpp"
+#include "ashera/configs.hpp"
 #include "ashera/io.hpp"
 #include "biosoup/timer.hpp"
 #include "cxxopts.hpp"
@@ -31,8 +32,7 @@ int main(int argc, char** argv) {
     auto const n_threads = result["threads"].as<std::uint32_t>();
 
     auto const win_size = result["window"].as<std::uint32_t>();
-    auto engine = ashera::Engine(
-        std::make_shared<thread_pool::ThreadPool>(n_threads), win_size);
+    auto thread_pool = std::make_shared<thread_pool::ThreadPool>(n_threads);
 
     auto timer = biosoup::Timer();
     timer.Start();
@@ -45,15 +45,17 @@ int main(int argc, char** argv) {
                timer.Stop(), sequences.size());
 
     timer.Start();
-    auto ans = engine.Correct(std::move(sequences));
+    auto ans = ashera::FindSnpFreeOverlaps(thread_pool, ashera::RamConfig(),
+                                           sequences);
 
-    fmt::print(stderr,
-               FMT_COMPILE("[ashera]({:12.3f}s) : generated corrected reads\n"),
-               timer.Stop());
+    // fmt::print(stderr,
+    //            FMT_COMPILE("[ashera]({:12.3f}s) : generated corrected
+    //            reads\n"), timer.Stop());
 
-    for (auto const& it : ans) {
-      fmt::print(stdout, FMT_COMPILE(">{}\n{}\n"), it->name, it->InflateData());
-    }
+    // for (auto const& it : ans) {
+    //   fmt::print(stdout, FMT_COMPILE(">{}\n{}\n"), it->name,
+    //   it->InflateData());
+    // }
 
   } catch (std::exception const& e) {
     std::cerr << e.what() << std::endl;

@@ -103,8 +103,9 @@ endif()
 
 set(${PROJECT_NAME}_LIB_SRC
   src/ashera/detail/overlap.cxx
-
-  src/ashera/engine.cxx
+  
+  src/ashera/algorithm.cxx
+  src/ashera/configs.cxx
   src/ashera/io.cxx
 )
 
