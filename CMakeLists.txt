@@ -104,6 +104,7 @@ endif()
 set(${PROJECT_NAME}_LIB_SRC
   src/ashera/detail/mapping_algo.cxx
   src/ashera/detail/overlap.cxx
+  src/ashera/detail/polish.cxx
   src/ashera/detail/snp_filter.cxx
   
   src/ashera/algorithm.cxx
