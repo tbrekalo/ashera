@@ -70,17 +70,6 @@ auto FindSnpFreeOverlaps(
 
   auto dst = std::vector<std::unique_ptr<biosoup::NucleicAcid>>();
   dst.reserve(reads.size());
-  /*
-      form batches
-        -> put a memory limit on how much you gonna work with
-
-      you need a concept of a window and an interval
-        -> slice up the target sequence into windows of specified length
-          -> take an overlap, calculate the alignment
-              -> from alignment, split up the reference according to windows
-                  -> windows are based on the query
-                    (NOTE: different than racon impl)
-  */
 
   auto const find_batch_end_idx =
       [&reads, &overlaps](std::size_t const begin_idx,
@@ -103,9 +92,11 @@ auto FindSnpFreeOverlaps(
     return curr_idx;
   };
 
-  auto const package_for_polish =
-      [&reads](std::uint32_t const read_id,
-               std::vector<biosoup::Overlap> ovlp_vec) -> detail::PolishPack {
+  auto const pack_for_polish = [&reads](std::uint32_t const read_id,
+                                        std::vector<biosoup::Overlap> ovlp_vec)
+      -> std::tuple<std::unique_ptr<biosoup::NucleicAcid>,
+                    std::vector<biosoup::Overlap>,
+                    std::vector<std::unique_ptr<biosoup::NucleicAcid>>> {
     auto target = std::make_unique<biosoup::NucleicAcid>(*reads[read_id]);
     auto references = std::vector<std::unique_ptr<biosoup::NucleicAcid>>();
     references.reserve(ovlp_vec.size());
@@ -148,11 +139,12 @@ auto FindSnpFreeOverlaps(
       it.rhs_id = reindex_val;
     }
 
-    return detail::PolishPack{
-        .target = std::make_unique<biosoup::NucleicAcid>(*reads[read_id]),
+    return std::make_tuple<std::unique_ptr<biosoup::NucleicAcid>,
+                           std::vector<biosoup::Overlap>,
+                           std::vector<std::unique_ptr<biosoup::NucleicAcid>>>(
 
-        .overlaps = std::move(ovlp_vec),
-        .references = std::move(references)};
+        std::make_unique<biosoup::NucleicAcid>(*reads[read_id]),
+        std::move(ovlp_vec), std::move(references));
   };
 
   timer.Start();
@@ -165,10 +157,14 @@ auto FindSnpFreeOverlaps(
 
     for (auto id = polish_batch_begin; id < polish_batch_end; ++id) {
       thread_pool->Submit(
-          [&package_for_polish, &overlaps](std::uint32_t const target_id)
+          [&pack_for_polish, &overlaps, config](std::uint32_t const target_id)
               -> std::unique_ptr<biosoup::NucleicAcid> {
-            return detail::Polish(  // TODO: think of a better API design
-                package_for_polish(target_id, std::move(overlaps[target_id])));
+            auto [target, ovlps_reindexed, references] =
+                pack_for_polish(target_id, std::move(overlaps[target_id]));
+
+            return detail::Polish(config, std::move(target),
+                                  std::move(ovlps_reindexed),
+                                  std::move(references));
           },
           id);
     }

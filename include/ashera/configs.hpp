@@ -25,7 +25,7 @@ struct PolishConfig {
   double error_threshold = 0.3;
 
   std::uint32_t window_len = 500U;
-  SpoaConfig spao_cfg;
+  SpoaConfig spoa_config;
 };
 
 }  // namespace ashera

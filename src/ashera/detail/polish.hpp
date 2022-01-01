@@ -4,19 +4,18 @@
 #include <memory>
 #include <vector>
 
+#include "ashera/configs.hpp"
+
 #include "biosoup/nucleic_acid.hpp"
 #include "biosoup/overlap.hpp"
 
 namespace ashera::detail {
 
-struct PolishPack {
-  std::unique_ptr<biosoup::NucleicAcid> target;
-
-  std::vector<biosoup::Overlap> overlaps;
-  std::vector<std::unique_ptr<biosoup::NucleicAcid>> references;
-};
-
-[[nodiscard]] auto Polish(PolishPack&& polish_pack)
+[[nodiscard]] auto Polish(
+    PolishConfig config, 
+    std::unique_ptr<biosoup::NucleicAcid> target,
+    std::vector<biosoup::Overlap> overlaps,
+    std::vector<std::unique_ptr<biosoup::NucleicAcid>> references)
     -> std::unique_ptr<biosoup::NucleicAcid>;
 
 }  // namespace ashera::detail
