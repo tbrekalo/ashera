@@ -43,12 +43,12 @@ auto IntervalLength(Interval const intv) -> std::uint32_t {
 
   auto target_str = target->InflateData();
 
-  auto windows = std::vector<spoa::Graph>();
-  windows.resize(static_cast<std::size_t>(std::ceil(
+  auto window_graphs = std::vector<spoa::Graph>();
+  window_graphs.resize(static_cast<std::size_t>(std::ceil(
       static_cast<double>(target->inflated_len) / config.window_len)));
 
-  auto window_ends = std::vector<std::uint32_t>(windows.size());
-  for (auto window_id = 0; window_id < windows.size(); ++window_id) {
+  auto window_ends = std::vector<std::uint32_t>(window_graphs.size());
+  for (auto window_id = 0; window_id < window_graphs.size(); ++window_id) {
     auto const window_begin = window_id * config.window_len;
     auto const window_end =
         std::min(window_begin + config.window_len, target->inflated_len);
@@ -56,16 +56,16 @@ auto IntervalLength(Interval const intv) -> std::uint32_t {
     auto const backbone_str =
         target_str.substr(window_begin, window_end - window_begin);
 
-    windows[window_id].AddAlignment(spoa::Alignment(), backbone_str, 0U);
+    window_graphs[window_id].AddAlignment(spoa::Alignment(), backbone_str, 0U);
     window_ends.push_back(window_end);
   }
 
-  std::sort(overlaps.cbegin(), overlaps.cend(),
+  std::sort(overlaps.begin(), overlaps.end(),
             [](biosoup::Overlap const& a, biosoup::Overlap const& b) -> bool {
               return a.lhs_begin < b.lhs_begin;
             });
 
-  auto const align_to_window = [&alignment_engine, &references, &windows,
+  auto const align_to_window = [&alignment_engine, &references, &window_graphs,
                                 window_len = config.window_len](
                                    std::uint32_t const window_idx,
                                    std::uint32_t const reference_idx,
@@ -87,10 +87,10 @@ auto IntervalLength(Interval const intv) -> std::uint32_t {
     auto alignment = spoa::Alignment();
     if (target_local_intv.begin_idx < kBeginWhitin &&
         target_local_intv.end_idx > kEndWithin) {
-      alignment_engine->Align(ref_substring, windows[window_idx]);
+      alignment_engine->Align(ref_substring, window_graphs[window_idx]);
     } else {
       auto mapping = std::vector<spoa::Graph::Node const*>();
-      auto subgraph = windows[window_idx].Subgraph(
+      auto subgraph = window_graphs[window_idx].Subgraph(
           target_local_intv.begin_idx, target_local_intv.end_idx - 1, &mapping);
       alignment = alignment_engine->Align(ref_substring, subgraph);
       subgraph.UpdateAlignment(mapping, &alignment);
@@ -151,7 +151,17 @@ auto IntervalLength(Interval const intv) -> std::uint32_t {
         case 2: {  // insertion on the target
           ++target_pos;
 
-          // TODO: target logic
+          active_target_interval.end_idx = target_pos;
+          if (active_target_interval.end_idx == window_ends[window_idx]) {
+            ++active_target_interval.end_idx;
+            ++active_reference_interval.end_idx;
+
+            align_to_window(window_idx, ovlp.rhs_id, active_target_interval,
+                            active_reference_interval);
+
+            active_interval = false;
+            ++window_idx;
+          }
 
           break;
         }
@@ -163,9 +173,12 @@ auto IntervalLength(Interval const intv) -> std::uint32_t {
     }
   }
 
-  // TODO: generate consensus
+  auto polished_data = std::string();
+  for (auto& it : window_graphs) {
+    polished_data += it.GenerateConsensus();
+  }
 
-  return std::unique_ptr<biosoup::NucleicAcid>();
+  return std::make_unique<biosoup::NucleicAcid>(target->name, polished_data);
 }
 
 }  // namespace ashera::detail

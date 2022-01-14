@@ -37,25 +37,37 @@ int main(int argc, char** argv) {
     auto timer = biosoup::Timer();
     timer.Start();
 
-    auto const reads = result["reads"].as<std::vector<std::string>>();
-    auto sequences = ashera::LoadReads(reads);
+    auto const reads_path = result["reads"].as<std::vector<std::string>>();
+    auto raw_reads = ashera::LoadReads(reads_path);
 
     fmt::print(stderr,
                FMT_COMPILE("[ashera]({:12.3f}s) : loaded {} sequences\n"),
-               timer.Stop(), sequences.size());
+               timer.Stop(), raw_reads.size());
 
     timer.Start();
-    auto ans = ashera::FindSnpFreeOverlaps(thread_pool, ashera::RamConfig(),
-                                           sequences);
+    auto solid_overlaps = ashera::FindSnpFreeOverlaps(
+        thread_pool, ashera::RamConfig(), raw_reads);
 
-    // fmt::print(stderr,
-    //            FMT_COMPILE("[ashera]({:12.3f}s) : generated corrected
-    //            reads\n"), timer.Stop());
+    fmt::print(stderr,
+               FMT_COMPILE("[ashera]({:12.3f}s) : generated solid"
+                           "overlaps\n"),
+               timer.Stop());
 
-    // for (auto const& it : ans) {
-    //   fmt::print(stdout, FMT_COMPILE(">{}\n{}\n"), it->name,
-    //   it->InflateData());
-    // }
+    auto polish_cfg = ashera::PolishConfig();
+    polish_cfg.window_len = win_size;
+
+    timer.Start();
+    auto const polished_reads =
+        ashera::PolishReads(thread_pool, polish_cfg, std::move(raw_reads),
+                            std::move(solid_overlaps));
+
+    fmt::print(stderr,
+               FMT_COMPILE("[ashera]({:12.3f}s) : polished {} sequences"),
+               timer.Stop(), polished_reads.size());
+
+    for (auto const& it : polished_reads) {
+      fmt::print(stdout, FMT_COMPILE(">{}\n{}\n"), it->name, it->InflateData());
+    }
 
   } catch (std::exception const& e) {
     std::cerr << e.what() << std::endl;
