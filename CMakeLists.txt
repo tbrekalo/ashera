@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.17)
-project(ashera VERSION 1.0.0 
+project(ashera VERSION 0.2.0 
                LANGUAGES C CXX
                DESCRIPTION "Ashera is a read correction tool")
 
