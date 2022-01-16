@@ -17,7 +17,7 @@ struct RamConfig {
 struct SpoaConfig {
   std::int8_t match = 3;
   std::int8_t mismatch = -5;
-  std::int8_t gap = -4;
+  std::int8_t gap = -3;
 };
 
 struct PolishConfig {

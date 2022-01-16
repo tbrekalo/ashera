@@ -7,6 +7,12 @@
 #include "spoa/alignment_engine.hpp"
 #include "spoa/spoa.hpp"
 
+/* clang-format off */
+#include "fmt/core.h"  // TODO: remove
+#include "fmt/compile.h"
+#include "fmt/ranges.h"
+/* clang-format on */
+
 namespace ashera::detail {
 
 auto constexpr kAllowedFuzzPercent = 0.01;
@@ -47,7 +53,9 @@ auto IntervalLength(Interval const intv) -> std::uint32_t {
   window_graphs.resize(static_cast<std::size_t>(std::ceil(
       static_cast<double>(target->inflated_len) / config.window_len)));
 
-  auto window_ends = std::vector<std::uint32_t>(window_graphs.size());
+  auto window_ends = std::vector<std::uint32_t>();
+  window_ends.reserve(window_graphs.size());
+
   for (auto window_id = 0; window_id < window_graphs.size(); ++window_id) {
     auto const window_begin = window_id * config.window_len;
     auto const window_end =
@@ -87,7 +95,8 @@ auto IntervalLength(Interval const intv) -> std::uint32_t {
     auto alignment = spoa::Alignment();
     if (target_local_intv.begin_idx < kBeginWhitin &&
         target_local_intv.end_idx > kEndWithin) {
-      alignment_engine->Align(ref_substring, window_graphs[window_idx]);
+      alignment =
+          alignment_engine->Align(ref_substring, window_graphs[window_idx]);
     } else {
       auto mapping = std::vector<spoa::Graph::Node const*>();
       auto subgraph = window_graphs[window_idx].Subgraph(
@@ -95,18 +104,32 @@ auto IntervalLength(Interval const intv) -> std::uint32_t {
       alignment = alignment_engine->Align(ref_substring, subgraph);
       subgraph.UpdateAlignment(mapping, &alignment);
     }
+
+    window_graphs[window_idx].AddAlignment(alignment, ref_substring);
+  };
+
+  auto const overlap_strings =
+      [&target_str, &references](
+          biosoup::Overlap const& ovlp) -> std::pair<std::string, std::string> {
+    auto target_substr =
+        target_str.substr(ovlp.lhs_begin, ovlp.lhs_end - ovlp.lhs_begin);
+
+    auto ref_substr = references[ovlp.rhs_id]->InflateData(
+        ovlp.rhs_begin, ovlp.rhs_end - ovlp.rhs_begin);
+
+    return std::make_pair(std::move(target_substr), std::move(ref_substr));
   };
 
   for (auto const& ovlp : overlaps) {
-    auto const& ref = references[ovlp.rhs_id];
+    auto const [target_substr, ref_substr] = overlap_strings(ovlp);
 
-    auto const ref_str = ref->InflateData();
     auto edlib_align_res = edlibAlign(
-        target_str.c_str(), target_str.size(), ref_str.c_str(), ref_str.size(),
+        target_substr.c_str(), target_substr.size(), ref_substr.c_str(),
+        ref_substr.size(),
         edlibNewAlignConfig(-1, EDLIB_MODE_NW, EDLIB_TASK_PATH, nullptr, 0));
 
-    auto target_pos = ovlp.lhs_id - 1U;
-    auto reference_pos = ovlp.rhs_id - 1U;
+    auto target_pos = ovlp.lhs_begin - 1U;
+    auto reference_pos = ovlp.rhs_begin - 1U;
 
     bool active_interval = false;
     auto active_target_interval = Interval();
@@ -128,8 +151,8 @@ auto IntervalLength(Interval const intv) -> std::uint32_t {
           }
 
           active_target_interval.end_idx = target_pos;
-          active_reference_interval.begin_idx = reference_pos;
-          if (active_target_interval.end_idx == window_ends[window_idx]) {
+          active_reference_interval.end_idx = reference_pos;
+          if (active_target_interval.end_idx + 1U == window_ends[window_idx]) {
             ++active_target_interval.end_idx;
             ++active_reference_interval.end_idx;
 
@@ -144,25 +167,28 @@ auto IntervalLength(Interval const intv) -> std::uint32_t {
         }
 
         case 1: {  // insertion on the polishing reference
-          ++reference_pos;
+          ++target_pos;
+
+          active_target_interval.end_idx = target_pos;
+          if (active_target_interval.end_idx + 1U == window_ends[window_idx]) {
+            if (active_interval) {
+              ++active_target_interval.end_idx;
+              ++active_reference_interval.end_idx;
+
+              align_to_window(window_idx, ovlp.rhs_id, active_target_interval,
+                              active_reference_interval);
+
+              active_interval = false;
+            }
+
+            ++window_idx;
+          }
+
           break;
         }
 
         case 2: {  // insertion on the target
-          ++target_pos;
-
-          active_target_interval.end_idx = target_pos;
-          if (active_target_interval.end_idx == window_ends[window_idx]) {
-            ++active_target_interval.end_idx;
-            ++active_reference_interval.end_idx;
-
-            align_to_window(window_idx, ovlp.rhs_id, active_target_interval,
-                            active_reference_interval);
-
-            active_interval = false;
-            ++window_idx;
-          }
-
+          ++reference_pos;
           break;
         }
 
@@ -175,6 +201,7 @@ auto IntervalLength(Interval const intv) -> std::uint32_t {
 
   auto polished_data = std::string();
   for (auto& it : window_graphs) {
+    auto const consensus = it.GenerateConsensus();
     polished_data += it.GenerateConsensus();
   }
 

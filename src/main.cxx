@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
                             std::move(solid_overlaps));
 
     fmt::print(stderr,
-               FMT_COMPILE("[ashera]({:12.3f}s) : polished {} sequences"),
+               FMT_COMPILE("[ashera]({:12.3f}s) : polished {} sequences\n"),
                timer.Stop(), polished_reads.size());
 
     for (auto const& it : polished_reads) {

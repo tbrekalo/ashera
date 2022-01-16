@@ -126,7 +126,7 @@ class BaseCoverage {
         }
 
         case 1: {  // insertion on the target
-          ++query_pos;
+          ++query_pos; //lhs insertion
           break;
         }
 

@@ -7,9 +7,11 @@
 #include <iterator>
 #include <memory>
 #include <numeric>
+#include <set>
 
 #include "biosoup/timer.hpp"
 #include "detail/mapping_algo.hpp"
+#include "detail/overlap.hpp"
 #include "detail/polish.hpp"
 #include "detail/snp_filter.hpp"
 #include "fmt/compile.h"
@@ -19,7 +21,7 @@ namespace ashera {
 
 namespace detail {
 
-auto constexpr kAlignBigBatchCap = 1ULL < 30ULL;  // ~1GB
+auto constexpr kAlignBigBatchCap = 1ULL << 30ULL;  // ~1GB
 
 }  // namespace detail
 
@@ -32,6 +34,7 @@ auto FindSnpFreeOverlaps(
 
   timer.Start();
   auto overlaps = detail::MapSequences(thread_pool, reads);
+  return overlaps;
 
   auto const n_ovlps_before = std::accumulate(
       overlaps.cbegin(), overlaps.cend(), 0U,
@@ -71,13 +74,78 @@ auto FindSnpFreeOverlaps(
   auto dst = std::vector<std::unique_ptr<biosoup::NucleicAcid>>();
   dst.reserve(reads.size());
 
+  auto const filter_overlaps = [&reads](std::vector<biosoup::Overlap>&& ovlps)
+      -> std::vector<biosoup::Overlap> {
+    // (begin on lhs, ovlp index)
+    auto events = std::vector<std::pair<std::uint32_t, std::uint32_t>>();
+    auto mark = std::vector<std::uint8_t>(ovlps.size(), 0U);
+    auto scores = std::vector<double>();
+
+    auto const cmp_lambda =
+        [](std::pair<std::uint32_t, std::uint32_t> const lhs,
+           std::pair<std::uint32_t, std::uint32_t> const rhs) -> bool {
+      return lhs.first > rhs.first;
+    };
+
+    // TODO: replace with a heap
+    auto active_ovlps =
+        std::set<std::pair<std::uint32_t, std::uint32_t>, decltype(cmp_lambda)>(
+            cmp_lambda);
+
+    events.reserve(ovlps.size() * 2U);
+    for (auto i = 0U; i < ovlps.size(); ++i) {
+      events.emplace_back(ovlps[i].lhs_begin, i);
+      events.emplace_back(ovlps[i].lhs_end, i);
+    }
+
+    std::sort(events.begin(), events.end());
+
+    scores.reserve(ovlps.size());
+    std::transform(ovlps.begin(), ovlps.end(), std::back_inserter(scores),
+                   detail::OverlapScore);
+
+    for (auto const& [target_pos, ovlp_id] : events) {
+      auto active_iter =
+          active_ovlps.find(std::make_pair(scores[ovlp_id], ovlp_id));
+
+      if (active_iter == active_ovlps.end()) {
+        active_ovlps.emplace(scores[ovlp_id], ovlp_id);
+      } else {
+        active_ovlps.erase(active_iter);
+      }
+
+      auto const end =
+          std::next(active_ovlps.end(), std::min(5UL, active_ovlps.size()));
+      for (auto iter = active_ovlps.begin(); iter != end; ++iter) {
+        mark[active_ovlps.begin()->second] = 1U;
+      }
+    }
+
+    auto const n_survivors = std::accumulate(
+        mark.cbegin(), mark.cend(), 0U,
+        [](std::uint32_t const init, std::uint8_t m) -> std::uint32_t {
+          return init + m;
+        });
+
+    auto dst = std::vector<biosoup::Overlap>();
+
+    dst.reserve(n_survivors);
+    for (auto i = 0U; i < ovlps.size(); ++i) {
+      if (mark[i]) {
+        dst.emplace_back(ovlps[i]);
+      }
+    }
+
+    return dst;
+  };
+
   auto const find_batch_end_idx =
       [&reads, &overlaps](std::size_t const begin_idx,
                           std::size_t const end_idx,
                           std::size_t const batch_cap) -> std::size_t {
     auto sum = 0ULL;
-    auto curr_idx = 0ULL;
-    while (curr_idx < end_idx && sum < batch_cap) {
+    auto curr_idx = begin_idx;
+    while (sum < batch_cap && curr_idx < end_idx) {
       sum += std::accumulate(
           overlaps[curr_idx].cbegin(), overlaps[curr_idx].cend(),
           reads[curr_idx]->inflated_len,
@@ -117,7 +185,7 @@ auto FindSnpFreeOverlaps(
 
     // reindex things...
     auto index_lookup = std::vector<std::pair<std::uint32_t, std::uint32_t>>();
-    index_lookup.reserve(ovlp_vec.size());  // TODO: swap out for inlined vector
+    index_lookup.reserve(ovlp_vec.size());
 
     std::transform(
         references.cbegin(), references.cend(),
@@ -149,14 +217,24 @@ auto FindSnpFreeOverlaps(
 
   timer.Start();
 
+  for (auto& it : overlaps) {
+    it = filter_overlaps(std::move(it));
+  }
+
+  fmt::print(
+      stderr,
+      FMT_COMPILE("[ashera::PolishReads]({:12.3f}) : filtered overlaps\n"),
+      timer.Stop());
+
   auto polish_futures =
       std::vector<std::future<std::unique_ptr<biosoup::NucleicAcid>>>();
-  for (auto polish_batch_begin = 0; polish_batch_begin < reads.size();) {
+  for (auto polish_batch_begin = 0U; polish_batch_begin < reads.size();) {
+    timer.Start();
     auto const polish_batch_end = find_batch_end_idx(
         polish_batch_begin, reads.size(), detail::kAlignBigBatchCap);
 
     for (auto id = polish_batch_begin; id < polish_batch_end; ++id) {
-      thread_pool->Submit(
+      polish_futures.emplace_back(thread_pool->Submit(
           [&pack_for_polish, &overlaps, config](std::uint32_t const target_id)
               -> std::unique_ptr<biosoup::NucleicAcid> {
             auto [target, ovlps_reindexed, references] =
@@ -166,7 +244,7 @@ auto FindSnpFreeOverlaps(
                                   std::move(ovlps_reindexed),
                                   std::move(references));
           },
-          id);
+          id));
     }
 
     for (auto& it : polish_futures) {
@@ -175,8 +253,9 @@ auto FindSnpFreeOverlaps(
 
     fmt::print(
         stderr,
-        FMT_COMPILE("[ashera::PolishReads]({:12.3f}) : polished {} reads\n"),
-        timer.Stop(), polish_batch_end - polish_batch_begin);
+        FMT_COMPILE(
+            "[ashera::PolishReads]({:12.3f}) : done polishing {}/{} reads\n"),
+        timer.Stop(), polish_batch_end, reads.size());
 
     polish_batch_begin = polish_batch_end;
     polish_futures.clear();
